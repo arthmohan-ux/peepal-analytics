@@ -362,26 +362,46 @@
     }
 
     .entries {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-    }
-    .entry {
-      padding: 13px 22px;
-      border-bottom: 1px solid var(--border);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      transition: background 0.1s;
-    }
-    .entry:hover { background: var(--bg); }
-    .entry:nth-child(2n) { border-right: none; }
-    .entry:nth-last-child(-n+2) { border-bottom: none; }
-    .entry:last-child:nth-child(odd) { border-bottom: none; border-right: none; }
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+}
+.entry {
+  display: table-row;
+}
+.entry:hover .entry-company,
+.entry:hover .entry-role { background: var(--bg); }
+.entry-company, .entry-role {
+  display: table-cell;
+  padding: 11px 22px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.86rem;
+  line-height: 1.4;
+  vertical-align: top;
+  width: 50%;
+}
+.entry:last-child .entry-company,
+.entry:last-child .entry-role { border-bottom: none; }
+.entry-company { font-weight: 500; color: var(--text-dark); border-right: 1px solid var(--border); }
+.entry-role { color: var(--text-mid); }
 
-    .entry-company { font-size: 0.86rem; font-weight: 500; color: var(--text-dark); line-height: 1.35; }
-    .entry-role { font-size: 0.78rem; color: var(--text-mid); }
-    .entry.role-only .entry-company { font-size: 0.84rem; font-weight: 400; color: var(--text-mid); }
+.entries-header {
+  display: table;
+  width: 100%;
+  background: var(--tag-bg);
+  border-bottom: 1px solid var(--border);
+}
+.entries-header-cell {
+  display: table-cell;
+  padding: 7px 22px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-light);
+  width: 50%;
+}
+.entries-header-cell:first-child { border-right: 1px solid var(--border); }
 
     /* ── LOADING / EMPTY ── */
     .state-message {
@@ -690,32 +710,26 @@ function renderResults() {
     card.style.animationDelay = `${i * 35}ms`;
 
     card.innerHTML = `
-      <div class="card-header">
-        <div class="card-title">${sub}</div>
-        <div class="card-count">${entries.length} capabilities</div>
-      </div>`;
+  <div class="card-header">
+    <div class="card-title">${sub}</div>
+    <div class="card-count">${entries.length} capabilities</div>
+  </div>
+  <div class="entries-header">
+    <div class="entries-header-cell">Company</div>
+    <div class="entries-header-cell">Role</div>
+  </div>`;
 
     const entriesEl = document.createElement('div');
     entriesEl.className = 'entries';
 
     entries.forEach(({ company, role }) => {
-      const entry = document.createElement('div');
-      const hasCompany = company && company.trim();
-      const hasRole = role && role.trim();
-
-      if (hasCompany && hasRole) {
-        entry.className = 'entry';
-        entry.innerHTML = `<div class="entry-company">${company}</div><div class="entry-role">${role}</div>`;
-      } else if (hasRole) {
-        entry.className = 'entry role-only';
-        entry.innerHTML = `<div class="entry-company">${role}</div>`;
-      } else if (hasCompany) {
-        entry.className = 'entry role-only';
-        entry.innerHTML = `<div class="entry-company">${company}</div>`;
-      }
-
-      entriesEl.appendChild(entry);
-    });
+  const entry = document.createElement('div');
+  entry.className = 'entry';
+  entry.innerHTML = `
+    <div class="entry-company">${company || ''}</div>
+    <div class="entry-role">${role || ''}</div>`;
+  entriesEl.appendChild(entry);
+});
 
     card.appendChild(entriesEl);
     grid.appendChild(card);
