@@ -1,0 +1,5 @@
+node_modules/
+.env.local
+*-cc0c4011d4de.json
+# Local Netlify folder
+.netlify
