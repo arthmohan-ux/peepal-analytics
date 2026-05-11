@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -210,6 +211,21 @@
     #global-search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,90,61,0.1); }
     #sb-search:focus { outline: none; border-color: var(--accent); }
 
+    /* VISUAL TAB */
+    .vis-controls { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 22px; margin-bottom: 24px; box-shadow: var(--shadow); display: flex; gap: 32px; align-items: center; flex-wrap: wrap; }
+    .vis-control-group { display: flex; flex-direction: column; gap: 6px; }
+    .vis-label { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-light); }
+    .vis-date-input { border: 1px solid var(--border-mid); border-radius: 7px; padding: 6px 10px; font-family: 'DM Sans', sans-serif; font-size: 0.83rem; color: var(--text-dark); background: var(--bg); cursor: pointer; }
+    .vis-date-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,90,61,0.1); }
+    .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 22px; }
+    .chart-card.full-width { grid-column: 1 / -1; }
+    .chart-title { font-family: 'Instrument Serif', serif; font-size: 1rem; font-weight: 400; color: var(--text-dark); margin-bottom: 4px; }
+    .chart-subtitle { font-size: 0.75rem; color: var(--text-light); margin-bottom: 16px; }
+    .chart-canvas-wrap { position: relative; }
+
+    @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } .chart-card.full-width { grid-column: 1; } }
+
     /* ACTIVE FILTER PILLS */
     .active-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
     .active-pills:empty { display: none; margin: 0; }
@@ -250,6 +266,7 @@
   </header>
   <div class="tabs">
     <div class="tab active" data-tab="analytics">Analytics</div>
+    <div class="tab" data-tab="visual">Visual</div>
     <div class="tab" data-tab="clients">Clients</div>
   </div>
   <div class="page">
@@ -286,6 +303,38 @@
       <div class="active-pills" id="main-active-pills"></div>
 
       <div id="analytics-area"><div class="state-message"><div class="icon">⟳</div><p>Loading analytics data...</p></div></div>
+    </div>
+
+    <!-- VISUAL -->
+    <div class="tab-panel" id="tab-visual">
+      <div class="page-title">
+        <h1>Visual</h1>
+        <p>Charts and breakdowns — filtered by the same selections as Analytics.</p>
+      </div>
+
+      <!-- VISUAL-SPECIFIC CONTROLS -->
+      <div class="vis-controls">
+        <div class="vis-control-group">
+          <div class="vis-label">Top N Companies</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="range" id="top-n-slider" min="5" max="30" value="10" style="width:120px;accent-color:var(--accent);" />
+            <span id="top-n-val" style="font-size:0.85rem;font-weight:600;color:var(--text-dark);min-width:24px;">10</span>
+          </div>
+        </div>
+        <div class="vis-control-group">
+          <div class="vis-label">Date Range</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="date" id="date-from" class="vis-date-input" />
+            <span style="font-size:0.8rem;color:var(--text-light);">to</span>
+            <input type="date" id="date-to" class="vis-date-input" />
+            <button class="btn-secondary" id="date-clear" style="font-size:0.75rem;padding:5px 10px;">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="visual-area">
+        <div class="state-message"><div class="icon">⟳</div><p>Loading charts...</p></div>
+      </div>
     </div>
 
     <!-- CLIENTS -->
@@ -332,13 +381,15 @@
     <div class="sidebar-tab active" data-sbtab="profile">Profile</div>
     <div class="sidebar-tab" data-sbtab="joinees">Joinees</div>
     <div class="sidebar-tab" data-sbtab="drops">Offer Drops</div>
-    <div class="sidebar-tab" data-sbtab="bu">BUs & Designations</div>
+    <div class="sidebar-tab" data-sbtab="bus">BUs</div>
+    <div class="sidebar-tab" data-sbtab="designations">Designations</div>
   </div>
   <div class="sidebar-content">
     <div class="sidebar-tab-panel active" id="sbtab-profile"></div>
     <div class="sidebar-tab-panel" id="sbtab-joinees"></div>
     <div class="sidebar-tab-panel" id="sbtab-drops"></div>
-    <div class="sidebar-tab-panel" id="sbtab-bu"></div>
+    <div class="sidebar-tab-panel" id="sbtab-bus"></div>
+    <div class="sidebar-tab-panel" id="sbtab-designations"></div>
   </div>
 </div>
 
@@ -409,6 +460,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'visual') renderVisual();
   });
 });
 
@@ -617,6 +669,7 @@ function updateDependentFilters(scope) {
 function onMainFilterChange() {
   renderAnalyticsTable();
   renderActivePills();
+  if (document.querySelector('.tab[data-tab="visual"]')?.classList.contains('active')) renderVisual();
 }
 
 function renderActivePills() {
@@ -746,13 +799,15 @@ function renderAnalyticsTable() {
     { key: 'hq', label: 'HQ Location' }, { key: 'revenue', label: 'Total Revenue' },
     { key: 'industry', label: 'Industry' }, { key: 'offers', label: 'Total Offers' },
     { key: 'joinees', label: 'Joinees' }, { key: 'drops', label: 'Offer Drops' },
+    { key: 'topDesig', label: 'Top Designations', noSort: true },
   ];
   const table = document.createElement('table'); table.className = 'analytics-table';
   const thead = document.createElement('thead'); const hrow = document.createElement('tr');
   cols.forEach(col => {
     const th = document.createElement('th'); th.textContent = col.label; th.dataset.col = col.key;
     if (sortCol === col.key) th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
-    th.addEventListener('click', () => { sortCol === col.key ? sortDir = sortDir === 'asc' ? 'desc' : 'asc' : (sortCol = col.key, sortDir = 'desc'); renderAnalyticsTable(); });
+    if (!col.noSort) th.addEventListener('click', () => { sortCol === col.key ? sortDir = sortDir === 'asc' ? 'desc' : 'asc' : (sortCol = col.key, sortDir = 'desc'); renderAnalyticsTable(); });
+    else th.style.cursor = 'default';
     hrow.appendChild(th);
   });
   thead.appendChild(hrow); table.appendChild(thead);
@@ -760,6 +815,14 @@ function renderAnalyticsTable() {
   const tbody = document.createElement('tbody');
   rows.forEach(row => {
     const tr = document.createElement('tr');
+    // Compute top 3 designations for this client
+    const desigMap = {};
+    row.joinees.forEach(j => { if (j.designation) desigMap[j.designation] = (desigMap[j.designation] || 0) + 1; });
+    const topDesig = Object.entries(desigMap).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([d]) => d);
+    const topDesigHTML = topDesig.length
+      ? topDesig.map(d => `<span class="ind-tag" style="margin:1px 2px;display:inline-block;">${d}</span>`).join('')
+      : '<span style="color:var(--text-light)">—</span>';
+
     tr.innerHTML = `
       <td><span class="client-link">${row.client}</span></td>
       <td>${row.lastJoinDate || '<span style="color:var(--text-light)">—</span>'}</td>
@@ -768,7 +831,8 @@ function renderAnalyticsTable() {
       <td>${row.industry ? `<span class="ind-tag">${row.industry}</span>` : '<span style="color:var(--text-light)">—</span>'}</td>
       <td>${row.joinees.length + row.drops.length}</td>
       <td>${row.joinees.length}</td>
-      <td>${row.drops.length}</td>`;
+      <td>${row.drops.length}</td>
+      <td style="max-width:220px;line-height:1.6;">${topDesigHTML}</td>`;
     tr.querySelector('.client-link').addEventListener('click', () => openSidebar(row.client));
     tbody.appendChild(tr);
   });
@@ -781,6 +845,13 @@ function formatNum(n) {
   if (n >= 10000000) return (n / 10000000).toFixed(2) + 'Cr';
   if (n >= 100000) return (n / 100000).toFixed(2) + 'L';
   return n.toLocaleString('en-IN');
+}
+
+// For chart axes and tooltips — takes raw rupee value
+function fmtChart(v) {
+  if (v >= 10000000) return '₹' + (v / 10000000).toFixed(2) + 'Cr';
+  if (v >= 100000)   return '₹' + (v / 100000).toFixed(2) + 'L';
+  return '₹' + v.toLocaleString('en-IN');
 }
 
 // ── SIDEBAR ──
@@ -877,11 +948,8 @@ function renderSidebar() {
 
   renderAccordion('sbtab-joinees', joinees, 'joinee');
   renderAccordion('sbtab-drops', drops, 'drop');
-  renderBUTab('sbtab-bu', joinees);
-
-  renderAccordion('sbtab-joinees', joinees, 'joinee');
-  renderAccordion('sbtab-drops', drops, 'drop');
-  renderBUTab('sbtab-bu', joinees);
+  renderBUTab('sbtab-bus', joinees);
+  renderDesignationsTab('sbtab-designations', joinees);
 }
 
 function renderAccordion(panelId, records, type) {
@@ -944,34 +1012,83 @@ function renderAccordion(panelId, records, type) {
 
 function renderBUTab(panelId, joinees) {
   const panel = document.getElementById(panelId);
-  const filtered = joinees;
-
-  if (!filtered.length) { panel.innerHTML = `<div class="accordion-empty">No joinee data for selected period.</div>`; return; }
+  if (!joinees.length) { panel.innerHTML = `<div class="accordion-empty">No joinee data for selected period.</div>`; return; }
 
   const bus = {};
-  filtered.forEach(j => {
+  joinees.forEach(j => {
     const bu = j.role || 'Unspecified';
-    if (!bus[bu]) bus[bu] = new Set();
-    if (j.designation) bus[bu].add(j.designation);
+    if (!bus[bu]) bus[bu] = { count: 0 };
+    bus[bu].count++;
+  });
+  const sortedBUs = Object.keys(bus).sort((a, b) => bus[b].count - bus[a].count);
+
+  panel.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;">
+      <input type="text" id="bu-search" placeholder="Search BUs..." style="flex:1;border:1px solid var(--border-mid);border-radius:7px;padding:7px 11px;font-family:'DM Sans',sans-serif;font-size:0.82rem;color:var(--text-dark);background:var(--bg);" />
+      <button class="btn-export" id="bu-csv-btn">↓ CSV</button>
+    </div>
+    <div id="bu-list"></div>`;
+
+  const renderBUList = (query) => {
+    const container = panel.querySelector('#bu-list');
+    container.innerHTML = '';
+    const filtered = query ? sortedBUs.filter(bu => bu.toLowerCase().includes(query)) : sortedBUs;
+    if (!filtered.length) { container.innerHTML = `<div class="accordion-empty">No results.</div>`; return; }
+    filtered.forEach(bu => {
+      const row = document.createElement('div');
+      row.className = 'accordion-item';
+      row.innerHTML = `<div class="accordion-item-name">${bu}</div><div class="accordion-item-meta">${bus[bu].count} joinee${bus[bu].count !== 1 ? 's' : ''}</div>`;
+      container.appendChild(row);
+    });
+  };
+
+  panel.querySelector('#bu-search').addEventListener('input', function() { renderBUList(this.value.toLowerCase().trim()); });
+  panel.querySelector('#bu-csv-btn').addEventListener('click', () => {
+    const lines = ['BU / Role,Joinee Count', ...sortedBUs.map(bu => `"${bu}",${bus[bu].count}`)];
+    downloadCSV(lines.join('\n'), `${currentClient}-bus.csv`);
   });
 
-  const sortedBUs = Object.keys(bus).sort();
-  panel.innerHTML = '';
+  renderBUList('');
+}
 
-  sortedBUs.forEach(bu => {
-    const designations = [...bus[bu]].sort();
-    const acc = document.createElement('div'); acc.className = 'accordion';
-    acc.innerHTML = `
-      <div class="accordion-header">
-        <div><div class="accordion-title">${bu}</div><div class="accordion-meta">${designations.length} designation${designations.length !== 1 ? 's' : ''}</div></div>
-        <div class="accordion-arrow">▼</div>
-      </div>
-      <div class="accordion-body">
-        <div class="accordion-list">${designations.map(d => `<div class="accordion-item"><div class="accordion-item-name">${d}</div></div>`).join('')}</div>
-      </div>`;
-    acc.querySelector('.accordion-header').addEventListener('click', () => acc.classList.toggle('open'));
-    panel.appendChild(acc);
+function renderDesignationsTab(panelId, joinees) {
+  const panel = document.getElementById(panelId);
+  if (!joinees.length) { panel.innerHTML = `<div class="accordion-empty">No joinee data for selected period.</div>`; return; }
+
+  const desigs = {};
+  joinees.forEach(j => {
+    const d = j.designation || 'Unspecified';
+    desigs[d] = (desigs[d] || 0) + 1;
   });
+  const sorted = Object.entries(desigs).sort((a, b) => b[1] - a[1]);
+
+  panel.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;">
+      <input type="text" id="desig-search" placeholder="Search designations..." style="flex:1;border:1px solid var(--border-mid);border-radius:7px;padding:7px 11px;font-family:'DM Sans',sans-serif;font-size:0.82rem;color:var(--text-dark);background:var(--bg);" />
+      <button class="btn-export" id="desig-csv-btn">↓ CSV</button>
+    </div>
+    <div id="desig-list"></div>`;
+
+  const renderDesigList = (query) => {
+    const container = panel.querySelector('#desig-list');
+    container.innerHTML = '';
+    const filtered = query ? sorted.filter(([d]) => d.toLowerCase().includes(query)) : sorted;
+    if (!filtered.length) { container.innerHTML = `<div class="accordion-empty">No results.</div>`; return; }
+    filtered.forEach(([d, count]) => {
+      const row = document.createElement('div');
+      row.className = 'accordion-item';
+      row.innerHTML = `<div class="accordion-item-name">${d}</div><div class="accordion-item-meta">${count} joinee${count !== 1 ? 's' : ''}</div>`;
+      container.appendChild(row);
+    });
+  };
+
+  panel.querySelector('#desig-search').addEventListener('input', function() { renderDesigList(this.value.toLowerCase().trim()); });
+  panel.querySelector('#desig-csv-btn').addEventListener('click', () => {
+    const lines = ['Designation,Joinee Count', ...sorted.map(([d, c]) => `"${d}",${c}`)];
+    downloadCSV(lines.join('\n'), `${currentClient}-designations.csv`);
+  });
+
+  renderDesigList('');
 }
 
 // ── CSV EXPORT ──
@@ -1017,6 +1134,200 @@ function downloadCSV(content, filename) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
+
+// ── VISUAL TAB ──
+let visCharts = {};
+let topN = 10;
+let dateFrom = null, dateTo = null;
+
+function initChartDefaults() {
+  if (!window.Chart) return;
+  Chart.defaults.font.family = "'DM Sans', sans-serif";
+  Chart.defaults.font.size = 12;
+  Chart.defaults.color = '#9a9790';
+  Chart.defaults.plugins.legend.labels.boxWidth = 12;
+  Chart.defaults.plugins.legend.labels.padding = 16;
+}
+
+const PALETTE = [
+  '#2d5a3d','#4a8c5c','#6db87a','#a8d8b4','#c8e6ce',
+  '#c8773a','#e09456','#f0b97a','#f7d4aa',
+  '#3a5c8c','#5b7eb8','#8aaad4','#b8cceb',
+  '#7a3a8c','#a05cb8','#c488d4','#ddb8e8',
+  '#8c3a3a','#b85b5b','#d48a8a',
+];
+
+function getVisData() {
+  if (!AD) return { joinees: [], drops: [] };
+  let { joinees, drops } = getFilteredData(MF);
+  if (dateFrom) { joinees = joinees.filter(j => j.date && j.date >= dateFrom); drops = drops.filter(d => d.date && d.date >= dateFrom); }
+  if (dateTo)   { joinees = joinees.filter(j => j.date && j.date <= dateTo);   drops = drops.filter(d => d.date && d.date <= dateTo);   }
+  return { joinees, drops };
+}
+
+function destroyAllCharts() {
+  Object.keys(visCharts).forEach(id => { if (visCharts[id]) { visCharts[id].destroy(); } });
+  visCharts = {};
+}
+
+function renderVisual() {
+  if (!AD) return;
+  initChartDefaults();
+  const area = document.getElementById('visual-area');
+  if (!area) return;
+  const { joinees, drops } = getVisData();
+  destroyAllCharts();
+
+  area.innerHTML = `<div class="charts-grid" id="charts-grid"></div>`;
+  const grid = document.getElementById('charts-grid');
+
+  function card(title, subtitle, canvasId, fullWidth) {
+    const div = document.createElement('div');
+    div.className = 'chart-card' + (fullWidth ? ' full-width' : '');
+    div.innerHTML = `<div class="chart-title">${title}</div><div class="chart-subtitle">${subtitle}</div><div class="chart-canvas-wrap"><canvas id="${canvasId}"></canvas></div>`;
+    grid.appendChild(div);
+    return document.getElementById(canvasId);
+  }
+
+  // 1. Revenue by FY — stacked bar by industry
+  try {
+    const canvas = card('Revenue by Financial Year', 'Stacked by industry · in Lakhs', 'ch-rev-fy', true);
+    const fySet = [...new Set(joinees.map(j => j.fy).filter(Boolean))].sort();
+    const indSet = [...new Set(joinees.map(j => j.industry).filter(Boolean))].sort();
+    const datasets = indSet.map((ind, i) => ({
+      label: ind,
+      data: fySet.map(fy => joinees.filter(j => j.fy === fy && j.industry === ind).reduce((s, j) => s + j.billing, 0)),
+      backgroundColor: PALETTE[i % PALETTE.length], borderRadius: 2,
+    }));
+    visCharts['ch-rev-fy'] = new Chart(canvas, {
+      type: 'bar', data: { labels: fySet, datasets },
+      options: { responsive: true, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtChart(ctx.parsed.y)}` } } }, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: v => fmtChart(v) } } } }
+    });
+  } catch(e) { console.error('ch-rev-fy', e); }
+
+  // 2. Joinees vs Drops by FY — grouped bar
+  try {
+    const canvas = card('Joinees vs Offer Drops by FY', 'Count per financial year', 'ch-jd-fy');
+    const fySet = [...new Set([...joinees, ...drops].map(r => r.fy).filter(Boolean))].sort();
+    visCharts['ch-jd-fy'] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: fySet, datasets: [
+        { label: 'Joinees', data: fySet.map(fy => joinees.filter(j => j.fy === fy).length), backgroundColor: '#2d5a3d', borderRadius: 3 },
+        { label: 'Drops',   data: fySet.map(fy => drops.filter(d => d.fy === fy).length),   backgroundColor: '#c8773a', borderRadius: 3 },
+      ]},
+      options: { responsive: true, plugins: { legend: { position: 'bottom' } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true } } }
+    });
+  } catch(e) { console.error('ch-jd-fy', e); }
+
+  // 3. Revenue by Industry — horizontal bar
+  try {
+    const canvas = card('Revenue by Industry', 'Total billing in Lakhs', 'ch-rev-ind');
+    const indSet = [...new Set(joinees.map(j => j.industry).filter(Boolean))];
+    const sorted = indSet.map(ind => ({ ind, rev: joinees.filter(j => j.industry === ind).reduce((s, j) => s + j.billing, 0) })).sort((a, b) => b.rev - a.rev);
+    visCharts['ch-rev-ind'] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: sorted.map(s => s.ind), datasets: [{ data: sorted.map(s => s.rev), backgroundColor: PALETTE.slice(0, sorted.length), borderRadius: 3 }] },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtChart(ctx.parsed.x) } } }, scales: { x: { ticks: { callback: v => fmtChart(v) } }, y: { grid: { display: false } } } }
+    });
+  } catch(e) { console.error('ch-rev-ind', e); }
+
+  // 4. Top N clients by revenue
+  try {
+    const canvas = card(`Top ${topN} Clients by Revenue`, 'Ranked by total billing amount', 'ch-top-clients');
+    const clientMap = {};
+    joinees.forEach(j => { clientMap[j.client] = (clientMap[j.client] || 0) + j.billing; });
+    const sorted = Object.entries(clientMap).sort((a, b) => b[1] - a[1]).slice(0, topN);
+    visCharts['ch-top-clients'] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: sorted.map(s => s[0]), datasets: [{ data: sorted.map(s => s[1]), backgroundColor: '#2d5a3d', borderRadius: 3 }] },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtChart(ctx.parsed.x) } } }, scales: { x: { ticks: { callback: v => fmtChart(v) } }, y: { grid: { display: false } } } }
+    });
+  } catch(e) { console.error('ch-top-clients', e); }
+
+  // 5. HQ Location donut
+  try {
+    const canvas = card('HQ Location Distribution', 'Unique clients per country', 'ch-hq');
+    const hqMap = {};
+    [...new Set(joinees.map(j => j.client))].forEach(client => {
+      const hq = joinees.find(j => j.client === client)?.hq || 'Unknown';
+      hqMap[hq] = (hqMap[hq] || 0) + 1;
+    });
+    const sorted = Object.entries(hqMap).sort((a, b) => b[1] - a[1]);
+    visCharts['ch-hq'] = new Chart(canvas, {
+      type: 'doughnut',
+      data: { labels: sorted.map(s => s[0]), datasets: [{ data: sorted.map(s => s[1]), backgroundColor: PALETTE, borderWidth: 0, hoverOffset: 6 }] },
+      options: { responsive: true, cutout: '60%', plugins: { legend: { position: 'bottom' } } }
+    });
+  } catch(e) { console.error('ch-hq', e); }
+
+  // 6. Joining location bar
+  try {
+    const canvas = card('Joining Location', 'Where candidates are placed (top 15)', 'ch-join-loc');
+    const locMap = {};
+    joinees.forEach(j => { const loc = j.location || 'Unknown'; locMap[loc] = (locMap[loc] || 0) + 1; });
+    const sorted = Object.entries(locMap).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    visCharts['ch-join-loc'] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: sorted.map(s => s[0]), datasets: [{ data: sorted.map(s => s[1]), backgroundColor: '#6db87a', borderRadius: 3 }] },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true }, y: { grid: { display: false } } } }
+    });
+  } catch(e) { console.error('ch-join-loc', e); }
+
+  // 7. Monthly joinee + drop trend — line chart full width
+  try {
+    const canvas = card('Monthly Trend', 'Joinees and drops over time (last 24 months)', 'ch-monthly', true);
+    const allMonths = [...AD.meta.months].reverse(); // chronological
+    const last24 = allMonths.slice(-24);
+    const jMap = {}, dMap = {};
+    joinees.forEach(j => { if (j.month_label) jMap[j.month_label] = (jMap[j.month_label] || 0) + 1; });
+    drops.forEach(d => { if (d.month_label) dMap[d.month_label] = (dMap[d.month_label] || 0) + 1; });
+    visCharts['ch-monthly'] = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: last24,
+        datasets: [
+          { label: 'Joinees', data: last24.map(m => jMap[m] || 0), borderColor: '#2d5a3d', backgroundColor: 'rgba(45,90,61,0.08)', fill: true, tension: 0.35, pointRadius: 3, pointHoverRadius: 5 },
+          { label: 'Drops',   data: last24.map(m => dMap[m] || 0), borderColor: '#c8773a', backgroundColor: 'rgba(200,119,58,0.08)', fill: true, tension: 0.35, pointRadius: 3, pointHoverRadius: 5 },
+        ]
+      },
+      options: { responsive: true, plugins: { legend: { position: 'bottom' } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 12, maxRotation: 45 } }, y: { beginAtZero: true } } }
+    });
+  } catch(e) { console.error('ch-monthly', e); }
+
+  // 8. Top BUs by joinee count
+  try {
+    const canvas = card('Top BUs by Joinee Count', 'Business units with most hires (top 15)', 'ch-bu');
+    const buMap = {};
+    joinees.forEach(j => { const bu = j.role || 'Unspecified'; buMap[bu] = (buMap[bu] || 0) + 1; });
+    const sorted = Object.entries(buMap).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    visCharts['ch-bu'] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: sorted.map(s => s[0]), datasets: [{ data: sorted.map(s => s[1]), backgroundColor: '#e09456', borderRadius: 3 }] },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true }, y: { grid: { display: false } } } }
+    });
+  } catch(e) { console.error('ch-bu', e); }
+}
+
+document.getElementById('top-n-slider').addEventListener('input', function() {
+  topN = parseInt(this.value);
+  document.getElementById('top-n-val').textContent = topN;
+  if (document.querySelector('.tab[data-tab="visual"]').classList.contains('active')) renderVisual();
+});
+document.getElementById('date-from').addEventListener('change', function() {
+  dateFrom = this.value || null;
+  if (document.querySelector('.tab[data-tab="visual"]').classList.contains('active')) renderVisual();
+});
+document.getElementById('date-to').addEventListener('change', function() {
+  dateTo = this.value || null;
+  if (document.querySelector('.tab[data-tab="visual"]').classList.contains('active')) renderVisual();
+});
+document.getElementById('date-clear').addEventListener('click', () => {
+  dateFrom = dateTo = null;
+  document.getElementById('date-from').value = '';
+  document.getElementById('date-to').value = '';
+  if (document.querySelector('.tab[data-tab="visual"]').classList.contains('active')) renderVisual();
+});
+
 async function fetchClientsData() {
   try {
     const res = await fetch('/api/clients', { headers: { 'Authorization': 'Basic ' + authToken } });
