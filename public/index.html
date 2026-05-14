@@ -603,13 +603,13 @@ function initMainFilters() {
   const allHQs = [...new Set([...AD.joinees.map(j => j.hq), ...AD.drops.map(d => d.hq)].filter(Boolean))].sort();
   const bar = document.getElementById('main-filter-bar');
 
-  ddIndustry   = createDropdown({ id: 'mf-ind', label: 'Industry',    items: industries,          state: MF.industries,       onChange: () => { updateCompanyList(); onMainFilterChange(); }, parent: bar });
-  ddCompany    = createDropdown({ id: 'mf-co',  label: 'Company',     items: allCompanies,        state: MF.companies,        onChange: onMainFilterChange, parent: bar });
-  ddHQ         = createDropdown({ id: 'mf-hq',  label: 'HQ Location', items: allHQs,             state: MF.hqs,              onChange: onMainFilterChange, parent: bar });
+  ddIndustry   = createDropdown({ id: 'mf-ind', label: 'Industry',    items: industries,           state: MF.industries,       onChange: () => { updateCompanyList(); onMainFilterChange(); }, parent: bar });
+  ddCompany    = createDropdown({ id: 'mf-co',  label: 'Company',     items: allCompanies,         state: MF.companies,        onChange: onMainFilterChange, parent: bar });
+  ddHQ         = createDropdown({ id: 'mf-hq',  label: 'HQ Location', items: allHQs,              state: MF.hqs,              onChange: () => { updateIndustryList(); updateCompanyList(); onMainFilterChange(); }, parent: bar });
   ddEngagement = createDropdown({ id: 'mf-em',  label: 'Eng. Model',  items: engagementModels||[], state: MF.engagementModels, onChange: onMainFilterChange, parent: bar });
-  ddFY         = createDropdown({ id: 'mf-fy',  label: 'Fin. Year',   items: fys,                state: MF.fys,              onChange: () => { updateDependentFilters('main'); onMainFilterChange(); }, parent: bar });
-  ddFYQ        = createDropdown({ id: 'mf-fyq', label: 'Quarter',     items: fyqs,               state: MF.fyqs,             onChange: () => { updateDependentFilters('main'); onMainFilterChange(); }, parent: bar });
-  ddMonth      = createDropdown({ id: 'mf-mo',  label: 'Month',       items: months,             state: MF.months,           onChange: onMainFilterChange, parent: bar });
+  ddFY         = createDropdown({ id: 'mf-fy',  label: 'Fin. Year',   items: fys,                 state: MF.fys,              onChange: () => { updateDependentFilters('main'); onMainFilterChange(); }, parent: bar });
+  ddFYQ        = createDropdown({ id: 'mf-fyq', label: 'Quarter',     items: fyqs,                state: MF.fyqs,             onChange: () => { updateDependentFilters('main'); onMainFilterChange(); }, parent: bar });
+  ddMonth      = createDropdown({ id: 'mf-mo',  label: 'Month',       items: months,              state: MF.months,           onChange: onMainFilterChange, parent: bar });
 
   // Sidebar filters
   const sbBar = document.getElementById('sb-filter-bar');
@@ -619,24 +619,40 @@ function initMainFilters() {
 
   document.getElementById('main-reset').addEventListener('click', () => {
     MF.industries.clear(); MF.companies.clear(); MF.hqs.clear(); MF.engagementModels.clear(); MF.fys.clear(); MF.fyqs.clear(); MF.months.clear();
-    ddIndustry.update(industries); ddCompany.update(allCompanies); ddHQ.update(allHQs); ddEngagement.update(engagementModels||[]);
+    ddHQ.update(allHQs); ddIndustry.update(industries); ddCompany.update(allCompanies); ddEngagement.update(engagementModels||[]);
     ddFY.update(fys); ddFYQ.update(fyqs); ddMonth.update(months);
     onMainFilterChange();
   });
 }
 
+function updateIndustryList() {
+  if (!AD) return;
+  const allIndustries = [...new Set(AD.joinees.map(j => j.industry).filter(Boolean))].sort();
+  if (MF.hqs.size === 0) {
+    ddIndustry.update(allIndustries);
+    return;
+  }
+  const filtered = [...new Set([
+    ...AD.joinees.filter(j => MF.hqs.has(j.hq)).map(j => j.industry),
+    ...AD.drops.filter(d => MF.hqs.has(d.hq)).map(d => d.industry),
+  ].filter(Boolean))].sort();
+  ddIndustry.update(filtered);
+}
+
 function updateCompanyList() {
   if (!AD) return;
   const allCompanies = [...new Set([...AD.joinees.map(j => j.client), ...AD.drops.map(d => d.client)])].sort();
-  if (MF.industries.size === 0) {
+
+  // Apply both HQ and Industry filters to narrow companies
+  let joinees = AD.joinees, drops = AD.drops;
+  if (MF.hqs.size > 0) { joinees = joinees.filter(j => MF.hqs.has(j.hq)); drops = drops.filter(d => MF.hqs.has(d.hq)); }
+  if (MF.industries.size > 0) { joinees = joinees.filter(j => MF.industries.has(j.industry)); drops = drops.filter(d => MF.industries.has(d.industry)); }
+
+  if (MF.hqs.size === 0 && MF.industries.size === 0) {
     ddCompany.update(allCompanies);
     return;
   }
-  // Filter companies to only those in selected industries
-  const filtered = [...new Set([
-    ...AD.joinees.filter(j => MF.industries.has(j.industry)).map(j => j.client),
-    ...AD.drops.filter(d => MF.industries.has(d.industry)).map(d => d.client),
-  ])].sort();
+  const filtered = [...new Set([...joinees.map(j => j.client), ...drops.map(d => d.client)])].sort();
   ddCompany.update(filtered);
 }
 
@@ -678,13 +694,13 @@ function renderActivePills() {
   container.innerHTML = '';
 
   const groups = [
-    { label: 'Industry',   state: MF.industries,       onRemove: () => { updateCompanyList(); },               dd: () => ddIndustry },
-    { label: 'Company',    state: MF.companies,        onRemove: () => {},                                     dd: () => ddCompany },
-    { label: 'HQ',         state: MF.hqs,              onRemove: () => {},                                     dd: () => ddHQ },
-    { label: 'Eng. Model', state: MF.engagementModels, onRemove: () => {},                                     dd: () => ddEngagement },
-    { label: 'FY',         state: MF.fys,              onRemove: () => { updateDependentFilters('main'); },    dd: () => ddFY },
-    { label: 'Quarter',    state: MF.fyqs,             onRemove: () => { updateDependentFilters('main'); },    dd: () => ddFYQ },
-    { label: 'Month',      state: MF.months,           onRemove: () => {},                                     dd: () => ddMonth },
+    { label: 'Industry',   state: MF.industries,       onRemove: () => { updateCompanyList(); },                               dd: () => ddIndustry },
+    { label: 'Company',    state: MF.companies,        onRemove: () => {},                                                     dd: () => ddCompany },
+    { label: 'HQ',         state: MF.hqs,              onRemove: () => { updateIndustryList(); updateCompanyList(); },          dd: () => ddHQ },
+    { label: 'Eng. Model', state: MF.engagementModels, onRemove: () => {},                                                     dd: () => ddEngagement },
+    { label: 'FY',         state: MF.fys,              onRemove: () => { updateDependentFilters('main'); },                    dd: () => ddFY },
+    { label: 'Quarter',    state: MF.fyqs,             onRemove: () => { updateDependentFilters('main'); },                    dd: () => ddFYQ },
+    { label: 'Month',      state: MF.months,           onRemove: () => {},                                                     dd: () => ddMonth },
   ];
 
   groups.forEach(({ label, state, onRemove, dd }) => {
