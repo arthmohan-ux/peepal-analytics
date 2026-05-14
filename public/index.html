@@ -207,6 +207,8 @@
 
     .btn-export { padding: 6px 13px; background: none; border: 1px solid var(--border-mid); border-radius: 6px; font-family: 'DM Sans', sans-serif; font-size: 0.78rem; color: var(--text-mid); cursor: pointer; transition: all 0.15s; }
     .btn-export:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-secondary { padding: 6px 12px; background: none; border: 1px solid var(--border-mid); border-radius: 7px; font-family: 'DM Sans', sans-serif; font-size: 0.82rem; color: var(--text-mid); cursor: pointer; transition: all 0.15s; }
+    .btn-secondary:hover { border-color: var(--text-mid); color: var(--text-dark); }
 
     #global-search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,90,61,0.1); }
     #sb-search:focus { outline: none; border-color: var(--accent); }
@@ -265,9 +267,9 @@
     </div>
   </header>
   <div class="tabs">
-    <div class="tab active" data-tab="analytics">Analytics</div>
+    <div class="tab active" data-tab="analytics">Client Analytics</div>
     <div class="tab" data-tab="visual">Visual</div>
-    <div class="tab" data-tab="clients">Clients</div>
+    <div class="tab" data-tab="clients">Clients Worked With</div>
   </div>
   <div class="page">
 
@@ -603,9 +605,9 @@ function initMainFilters() {
   const allHQs = [...new Set([...AD.joinees.map(j => j.hq), ...AD.drops.map(d => d.hq)].filter(Boolean))].sort();
   const bar = document.getElementById('main-filter-bar');
 
+  ddHQ         = createDropdown({ id: 'mf-hq',  label: 'HQ Location', items: allHQs,              state: MF.hqs,              onChange: () => { updateIndustryList(); updateCompanyList(); onMainFilterChange(); }, parent: bar });
   ddIndustry   = createDropdown({ id: 'mf-ind', label: 'Industry',    items: industries,           state: MF.industries,       onChange: () => { updateCompanyList(); onMainFilterChange(); }, parent: bar });
   ddCompany    = createDropdown({ id: 'mf-co',  label: 'Company',     items: allCompanies,         state: MF.companies,        onChange: onMainFilterChange, parent: bar });
-  ddHQ         = createDropdown({ id: 'mf-hq',  label: 'HQ Location', items: allHQs,              state: MF.hqs,              onChange: () => { updateIndustryList(); updateCompanyList(); onMainFilterChange(); }, parent: bar });
   ddEngagement = createDropdown({ id: 'mf-em',  label: 'Eng. Model',  items: engagementModels||[], state: MF.engagementModels, onChange: onMainFilterChange, parent: bar });
   ddFY         = createDropdown({ id: 'mf-fy',  label: 'Fin. Year',   items: fys,                 state: MF.fys,              onChange: () => { updateDependentFilters('main'); onMainFilterChange(); }, parent: bar });
   ddFYQ        = createDropdown({ id: 'mf-fyq', label: 'Quarter',     items: fyqs,                state: MF.fyqs,             onChange: () => { updateDependentFilters('main'); onMainFilterChange(); }, parent: bar });

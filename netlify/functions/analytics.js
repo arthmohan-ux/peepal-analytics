@@ -82,9 +82,6 @@ exports.handler = async (event) => {
       getSheetData('Joinees All'), getSheetData('Offer Drop All'), getSheetData('Client Last Engagement'),
     ]);
 
-    // Debug: log first few engagement rows to see what we're getting
-    console.log('Engagement header row:', JSON.stringify(engagementRows[0]));
-    console.log('Engagement sample rows:', JSON.stringify(engagementRows.slice(1, 4)));
 
     const joinees = parseJoinees(joineeRows);
     const drops = parseDrops(dropRows);
