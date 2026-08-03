@@ -1,6 +1,8 @@
 const express = require('express');
 const path = require('path');
 const { google } = require('googleapis');
+const { getPack, assembleContext } = require('./netlify/lib/kb');
+const { chat, MODEL } = require('./netlify/lib/llm');
 
 const app = express();
 app.use(express.json());
@@ -40,6 +42,50 @@ app.post('/api/auth', (req, res) => {
   }
   const token = Buffer.from(`${username}:${password}`).toString('base64');
   res.json({ token });
+});
+
+// ── POST /api/ask (BD Copilot) ──
+const ASK_SYSTEM = `You are Peepal Consulting's BD Copilot. You help a business-development rep prepare things to say on a live client/prospect call, drawn ONLY from the DATA and KNOWLEDGE provided in the context block.
+
+HARD RULES:
+1. NUMBERS: Use only the exact numbers given in the context. NEVER invent, estimate, or sum numbers yourself. If a number is not in the context, say you don't have it. Totals are exact; anything labelled heuristic/approximate must be presented as approximate.
+2. STORIES: Prefer the "SAY THIS (client-safe)" wording. NEVER speak any line marked "INTERNAL ONLY" to a client.
+3. INTERNAL DOCTRINE: Anything marked "(INTERNAL ONLY)" is rep-only strategy — use it in the OPINION section, never as something to say aloud.
+4. Prefer the story whose PROBLEM mirrors the prospect's. Match, don't recite.
+
+OUTPUT: A single JSON object, no prose outside it:
+{"grounded":"Markdown call-ready answer, primary point first then secondary/tertiary, concrete numbers, client-safe story wording","opinion":"Markdown internal read for the rep; may use INTERNAL-ONLY doctrine; conservative if data is thin","confidence":"high|medium|low","sources_used":["ids"]}`;
+
+app.post('/api/ask', async (req, res) => {
+  if (!validateBasicAuth(req)) return res.status(401).json({ error: 'Unauthorized' });
+  const question = String((req.body && req.body.question) || '').trim();
+  const history = Array.isArray(req.body && req.body.history) ? req.body.history.slice(-8) : [];
+  if (!question) return res.status(400).json({ error: 'Empty question' });
+  try {
+    const pack = await getPack();
+    const convText = history.filter(m => m.role === 'user').map(m => m.content).join(' ') + ' ' + question;
+    const { context, scope } = assembleContext(convText, pack);
+    const messages = [
+      { role: 'system', content: ASK_SYSTEM },
+      { role: 'system', content: 'CONTEXT (your only source of truth):\n\n' + context },
+    ];
+    history.forEach(m => {
+      if (m.role === 'user') messages.push({ role: 'user', content: String(m.content).slice(0, 800) });
+      else if (m.role === 'assistant') messages.push({ role: 'assistant', content: String(m.content).slice(0, 1200) });
+    });
+    messages.push({ role: 'user', content: question });
+    const raw = await chat(messages, { temperature: 0.3, jsonMode: true, maxTokens: 1400 });
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { parsed = { grounded: raw || 'No answer.', opinion: '', confidence: 'low', sources_used: [] }; }
+    res.json({
+      grounded: parsed.grounded || '', opinion: parsed.opinion || '',
+      confidence: parsed.confidence || 'medium', sources_used: parsed.sources_used || [],
+      debug: { model: MODEL, matchedCompanies: scope.companies.map(c => c.name), industries: scope.industries },
+    });
+  } catch (err) {
+    console.error('ask error:', err);
+    res.status(500).json({ error: 'Copilot failed: ' + (err.message || 'unknown') });
+  }
 });
 
 // ── GET /api/clients ──

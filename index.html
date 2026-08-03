@@ -241,6 +241,47 @@
       .sidebar { width: 100%; right: -100%; }
       .filter-bar { gap: 8px; }
     }
+
+    /* ── SEARCH ROW BUTTONS ── */
+    .search-row { display: flex; gap: 8px; align-items: stretch; }
+    .btn-search, .btn-ask {
+      font-family: 'DM Sans', sans-serif; font-size: 0.85rem; font-weight: 500;
+      border-radius: 8px; padding: 0 16px; cursor: pointer; white-space: nowrap; transition: all 0.15s;
+    }
+    .btn-search { background: var(--surface); border: 1px solid var(--border-mid); color: var(--text-mid); }
+    .btn-search:hover { border-color: var(--text-mid); color: var(--text-dark); }
+    .btn-ask { background: var(--accent); border: 1px solid var(--accent); color: #fff; }
+    .btn-ask:hover { opacity: 0.9; }
+    .btn-ask:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── COPILOT ── */
+    .copilot-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; height: calc(100vh - 260px); min-height: 460px; overflow: hidden; }
+    .copilot-messages { flex: 1; overflow-y: auto; padding: 24px 26px; display: flex; flex-direction: column; gap: 18px; }
+    .cp-empty { margin: auto; text-align: center; color: var(--text-light); max-width: 520px; }
+    .cp-empty-icon { font-size: 1.8rem; margin-bottom: 8px; color: var(--accent); }
+    .cp-empty p { font-size: 0.9rem; margin-bottom: 18px; }
+    .cp-examples { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .cp-chip { font-family: 'DM Sans', sans-serif; font-size: 0.8rem; color: var(--text-mid); background: var(--bg); border: 1px solid var(--border-mid); border-radius: 100px; padding: 7px 14px; cursor: pointer; transition: all 0.15s; }
+    .cp-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+    .cp-msg-user { align-self: flex-end; max-width: 80%; background: var(--accent); color: #fff; padding: 10px 15px; border-radius: 14px 14px 4px 14px; font-size: 0.88rem; line-height: 1.5; }
+    .cp-msg-bot { align-self: stretch; max-width: 100%; display: flex; flex-direction: column; gap: 12px; }
+    .cp-grounded { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; font-size: 0.9rem; line-height: 1.6; color: var(--text-dark); }
+    .cp-grounded h4 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-light); margin-bottom: 8px; font-weight: 600; }
+    .cp-opinion { border: 1px solid rgba(45,90,61,0.25); background: var(--accent-bg); border-left: 3px solid var(--accent); border-radius: 10px; padding: 14px 16px; font-size: 0.86rem; line-height: 1.55; color: var(--text-dark); }
+    .cp-opinion h4 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--accent); margin-bottom: 7px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .cp-conf { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 100px; }
+    .cp-conf.high { background: #e3efe7; color: #2d5a3d; } .cp-conf.medium { background: #f4ecdf; color: #9a6a2a; } .cp-conf.low { background: #f4e0e0; color: #a53a3a; }
+    .cp-sources { font-size: 0.72rem; color: var(--text-light); }
+    .cp-grounded ul, .cp-opinion ul { margin: 6px 0 6px 18px; } .cp-grounded li, .cp-opinion li { margin-bottom: 4px; }
+    .cp-grounded strong, .cp-opinion strong { font-weight: 600; }
+    .cp-typing { align-self: flex-start; color: var(--text-light); font-size: 0.85rem; font-style: italic; }
+    .cp-error { align-self: stretch; background: #fbeaea; border: 1px solid #e6c4c4; color: #a53a3a; padding: 12px 15px; border-radius: 10px; font-size: 0.85rem; }
+
+    .copilot-inputbar { border-top: 1px solid var(--border); padding: 14px 18px; display: flex; gap: 10px; align-items: flex-end; background: var(--surface); }
+    #cp-input { flex: 1; resize: none; max-height: 140px; border: 1px solid var(--border-mid); border-radius: 9px; padding: 10px 13px; font-family: 'DM Sans', sans-serif; font-size: 0.9rem; color: var(--text-dark); background: var(--bg); line-height: 1.5; }
+    #cp-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,90,61,0.1); }
+    #cp-send { padding: 10px 20px; }
   </style>
 </head>
 <body>
@@ -270,6 +311,7 @@
     <div class="tab active" data-tab="analytics">Client Analytics</div>
     <div class="tab" data-tab="visual">Visual</div>
     <div class="tab" data-tab="clients">Clients Worked With [not necessarily closed]</div>
+    <div class="tab" data-tab="copilot">BD Copilot</div>
   </div>
   <div class="page">
 
@@ -289,10 +331,15 @@
       </div>
 
       <!-- GLOBAL SEARCH -->
-      <div style="margin-bottom: 12px; position:relative;">
-        <span style="position:absolute; left:13px; top:50%; transform:translateY(-50%); color:var(--text-light); font-size:0.9rem; pointer-events:none;">⌕</span>
-        <input type="text" id="global-search" placeholder="Search companies, industries, HQ locations, designations, roles..." style="width:100%; padding:10px 16px 10px 36px; border:1px solid var(--border-mid); border-radius:8px; font-family:'DM Sans',sans-serif; font-size:0.88rem; color:var(--text-dark); background:var(--surface); box-shadow:var(--shadow);" />
+      <div class="search-row" style="margin-bottom: 12px;">
+        <div style="position:relative; flex:1;">
+          <span style="position:absolute; left:13px; top:50%; transform:translateY(-50%); color:var(--text-light); font-size:0.9rem; pointer-events:none;">⌕</span>
+          <input type="text" id="global-search" placeholder="Search or ask a question, then press Enter to ask the Copilot..." style="width:100%; padding:10px 16px 10px 36px; border:1px solid var(--border-mid); border-radius:8px; font-family:'DM Sans',sans-serif; font-size:0.88rem; color:var(--text-dark); background:var(--surface); box-shadow:var(--shadow);" />
+        </div>
+        <button class="btn-search" id="btn-search-db">Search database</button>
+        <button class="btn-ask" id="btn-ask-bot">Ask Copilot →</button>
       </div>
+      <div style="font-size:0.75rem; color:var(--text-light); margin:-4px 0 12px;">Typing filters the table below. Press <strong>Enter</strong> or <strong>Ask Copilot</strong> to send the question to the BD Copilot.</div>
 
       <!-- FILTER BAR -->
       <div class="filter-bar" id="main-filter-bar">
@@ -363,6 +410,32 @@
         </div>
       </div>
       <div id="results-area"><div class="state-message"><div class="icon">◎</div><p>Select an industry and at least one subsector to view capabilities.</p></div></div>
+    </div>
+
+    <!-- BD COPILOT -->
+    <div class="tab-panel" id="tab-copilot">
+      <div class="page-title">
+        <h1>BD Copilot</h1>
+        <p>Ask about what we've done — by company, industry, role or seniority — and get call-ready talking points plus an internal read.</p>
+      </div>
+      <div class="copilot-wrap">
+        <div class="copilot-messages" id="cp-messages">
+          <div class="cp-empty" id="cp-empty">
+            <div class="cp-empty-icon">◇</div>
+            <p>Ask a question to get grounded talking points for a BD call.</p>
+            <div class="cp-examples">
+              <button class="cp-chip">What have we done for EY GDS?</button>
+              <button class="cp-chip">Who else in BFSI can I name-drop?</button>
+              <button class="cp-chip">Client says they have a strong internal team — what do I say?</button>
+              <button class="cp-chip">Our track record in aviation</button>
+            </div>
+          </div>
+        </div>
+        <div class="copilot-inputbar">
+          <textarea id="cp-input" rows="1" placeholder="Ask the Copilot... (Enter to send, Shift+Enter for a new line)"></textarea>
+          <button id="cp-send" class="btn-ask">Send</button>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -447,13 +520,39 @@ function showApp() {
 
 async function loadAll() { await Promise.all([fetchClientsData(), fetchAnalyticsData()]); }
 
-// Global search
+// Global search — typing filters the table live
 document.getElementById('global-search').addEventListener('input', function() {
   globalSearch = this.value.toLowerCase().trim();
   onMainFilterChange();
 });
+// Enter -> send the query to the Copilot; buttons do the same / stay
+document.getElementById('global-search').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); const q = this.value.trim(); if (q) sendToCopilot(q); }
+});
+document.getElementById('btn-ask-bot').addEventListener('click', () => {
+  const q = document.getElementById('global-search').value.trim();
+  if (q) sendToCopilot(q); else switchTab('copilot');
+});
+document.getElementById('btn-search-db').addEventListener('click', () => {
+  globalSearch = document.getElementById('global-search').value.toLowerCase().trim();
+  onMainFilterChange();
+  document.getElementById('analytics-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
-// Sidebar search removed
+// Programmatic tab switch (mirrors the tab click handler)
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'visual') renderVisual();
+}
+
+// Take a query from the search box into the Copilot tab and run it
+function sendToCopilot(q) {
+  switchTab('copilot');
+  document.getElementById('cp-input').value = q;
+  askCopilot(q);
+}
 
 // ── TABS ──
 document.querySelectorAll('.tab').forEach(tab => {
@@ -1398,6 +1497,92 @@ function renderClientResults() {
   });
   area.appendChild(grid);
 }
+
+// ── BD COPILOT ──
+let cpHistory = [];   // [{role:'user'|'assistant', content}]
+let cpBusy = false;
+
+function mdLite(s) {
+  // minimal, safe markdown: escape, then **bold**, bullet lists, line breaks
+  let html = String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const lines = html.split('\n');
+  let out = '', inList = false;
+  lines.forEach(line => {
+    const m = line.match(/^\s*[-*]\s+(.*)$/);
+    if (m) { if (!inList) { out += '<ul>'; inList = true; } out += '<li>' + m[1] + '</li>'; }
+    else { if (inList) { out += '</ul>'; inList = false; } if (line.trim()) out += '<p style="margin:4px 0;">' + line + '</p>'; }
+  });
+  if (inList) out += '</ul>';
+  return out;
+}
+
+function cpScroll() { const m = document.getElementById('cp-messages'); m.scrollTop = m.scrollHeight; }
+
+function cpAddUser(text) {
+  const empty = document.getElementById('cp-empty'); if (empty) empty.remove();
+  const div = document.createElement('div'); div.className = 'cp-msg-user'; div.textContent = text;
+  document.getElementById('cp-messages').appendChild(div); cpScroll();
+}
+
+function cpAddBot({ grounded, opinion, confidence, sources_used }) {
+  const wrap = document.createElement('div'); wrap.className = 'cp-msg-bot';
+  let html = `<div class="cp-grounded"><h4>Say on the call</h4>${mdLite(grounded)}</div>`;
+  if (opinion && opinion.trim()) {
+    const conf = (confidence || 'medium').toLowerCase();
+    html += `<div class="cp-opinion"><h4>Your read <span class="cp-conf ${conf}">${conf}</span></h4>${mdLite(opinion)}</div>`;
+  }
+  if (sources_used && sources_used.length) html += `<div class="cp-sources">Sources: ${sources_used.join(', ')}</div>`;
+  wrap.innerHTML = html;
+  document.getElementById('cp-messages').appendChild(wrap); cpScroll();
+}
+
+async function askCopilot(question) {
+  if (cpBusy) return;
+  const q = String(question || '').trim(); if (!q) return;
+  cpBusy = true;
+  document.getElementById('cp-send').disabled = true;
+  document.getElementById('btn-ask-bot').disabled = true;
+  cpAddUser(q);
+  document.getElementById('cp-input').value = '';
+
+  const typing = document.createElement('div'); typing.className = 'cp-typing'; typing.textContent = 'Thinking…';
+  document.getElementById('cp-messages').appendChild(typing); cpScroll();
+
+  try {
+    const res = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + authToken },
+      body: JSON.stringify({ question: q, history: cpHistory }),
+    });
+    typing.remove();
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Request failed');
+    const data = await res.json();
+    cpAddBot(data);
+    cpHistory.push({ role: 'user', content: q });
+    cpHistory.push({ role: 'assistant', content: data.grounded || '' });
+    if (cpHistory.length > 16) cpHistory = cpHistory.slice(-16);
+  } catch (err) {
+    typing.remove();
+    const e = document.createElement('div'); e.className = 'cp-error'; e.textContent = 'Copilot error: ' + (err.message || 'unknown') + '. Check that the API key and env vars are set.';
+    document.getElementById('cp-messages').appendChild(e); cpScroll();
+  } finally {
+    cpBusy = false;
+    document.getElementById('cp-send').disabled = false;
+    document.getElementById('btn-ask-bot').disabled = false;
+    document.getElementById('cp-input').focus();
+  }
+}
+
+// Copilot input handlers
+document.getElementById('cp-send').addEventListener('click', () => askCopilot(document.getElementById('cp-input').value));
+document.getElementById('cp-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askCopilot(this.value); }
+});
+document.getElementById('cp-input').addEventListener('input', function() {
+  this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+});
+document.querySelectorAll('.cp-chip').forEach(chip => chip.addEventListener('click', () => askCopilot(chip.textContent)));
 </script>
 </body>
 </html>
