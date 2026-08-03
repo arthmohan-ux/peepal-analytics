@@ -49,8 +49,7 @@ exports.handler = async (event) => {
     const { context, scope } = assembleContext(convText, pack);
 
     const messages = [
-      { role: 'system', content: SYSTEM_RULES },
-      { role: 'system', content: 'CONTEXT (this is your only source of truth):\n\n' + context },
+      { role: 'system', content: SYSTEM_RULES + '\n\nCONTEXT (this is your only source of truth):\n\n' + context },
     ];
     // prior turns for reference resolution (assistant turns are the grounded text only, kept short)
     history.forEach((m) => {

@@ -66,8 +66,7 @@ app.post('/api/ask', async (req, res) => {
     const convText = history.filter(m => m.role === 'user').map(m => m.content).join(' ') + ' ' + question;
     const { context, scope } = assembleContext(convText, pack);
     const messages = [
-      { role: 'system', content: ASK_SYSTEM },
-      { role: 'system', content: 'CONTEXT (your only source of truth):\n\n' + context },
+      { role: 'system', content: ASK_SYSTEM + '\n\nCONTEXT (your only source of truth):\n\n' + context },
     ];
     history.forEach(m => {
       if (m.role === 'user') messages.push({ role: 'user', content: String(m.content).slice(0, 800) });
