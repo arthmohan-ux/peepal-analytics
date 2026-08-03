@@ -1632,44 +1632,24 @@ async function askCopilot(question) {
         oBody = wrap.querySelector('.cp-opinion-body'), confEl = wrap.querySelector('.cp-conf'),
         srcEl = wrap.querySelector('.cp-sources'), actions = wrap.querySelector('.cp-actions');
 
-  let full = '', meta = null;
   try {
     const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + authToken },
       body: JSON.stringify({ question: q, history: cpHistory, user: currentUser() }),
     });
-    if (!res.ok || !res.body) { const j = await res.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + res.status)); }
-    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
-    for (;;) {
-      const { value, done } = await reader.read(); if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf('\n\n')) >= 0) {
-        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
-        const line = chunk.split('\n').find(l => l.startsWith('data:')); if (!line) continue;
-        let obj; try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
-        if (obj.t === 'delta') {
-          full += obj.v;
-          const s = splitSections(full);
-          gBody.innerHTML = mdLite(s.grounded || '…');
-          if (s.opinion) { oBox.style.display = ''; oBody.innerHTML = mdLite(s.opinion); }
-          cpScroll();
-        } else if (obj.t === 'done') { meta = obj; }
-        else if (obj.t === 'error') { throw new Error(obj.v); }
-      }
-    }
-    const s = splitSections(full);
-    gBody.innerHTML = mdLite(s.grounded || 'No answer.');
-    if (s.opinion) { oBox.style.display = ''; oBody.innerHTML = mdLite(s.opinion); }
-    const conf = (meta && meta.confidence) || 'medium';
+    if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + res.status)); }
+    const data = await res.json();
+    gBody.innerHTML = mdLite(data.grounded || 'No answer.');
+    if (data.opinion && data.opinion.trim()) { oBox.style.display = ''; oBody.innerHTML = mdLite(data.opinion); }
+    const conf = (data.confidence || 'medium');
     confEl.textContent = conf; confEl.className = 'cp-conf ' + conf;
-    const srcs = (meta && meta.sources) || '';
+    const srcs = data.sources || '';
     srcEl.textContent = srcs ? ('Sources: ' + srcs) : '';
     actions.style.display = '';
-    buildThumbs(actions, q, s.grounded + (s.opinion ? '\n\n[READ] ' + s.opinion : ''), srcs);
+    buildThumbs(actions, q, (data.grounded || '') + (data.opinion ? '\n\n[READ] ' + data.opinion : ''), srcs);
     cpHistory.push({ role: 'user', content: q });
-    cpHistory.push({ role: 'assistant', content: s.grounded || '' });
+    cpHistory.push({ role: 'assistant', content: data.grounded || '' });
     if (cpHistory.length > 16) cpHistory = cpHistory.slice(-16);
     loadRecent();
   } catch (err) {

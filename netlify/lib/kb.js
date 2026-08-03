@@ -88,6 +88,7 @@ async function buildPack() {
         joinees: 0, drops: 0, revenue: 0,
         byDesig: {}, byRole: {}, bySeniority: {}, skillIndex: {},
         exp: { sum: 0, count: 0, min: null, max: null }, expByCombo: {},
+        byLocation: {}, byPrev: {},
         firstJoin: null, lastJoin: null,
       };
     }
@@ -125,6 +126,10 @@ async function buildPack() {
         e.max = e.max === null ? yoe : Math.max(e.max, yoe);
       }
     }
+    const loc = r[14] ? String(r[14]).trim() : '';
+    if (loc) c.byLocation[loc] = (c.byLocation[loc] || 0) + 1;
+    const prev = r[15] ? String(r[15]).trim() : '';
+    if (prev) c.byPrev[prev] = (c.byPrev[prev] || 0) + 1;
     const d = safeDate(r[0]);
     if (d) { if (!c.firstJoin || d < c.firstJoin) c.firstJoin = d; if (!c.lastJoin || d > c.lastJoin) c.lastJoin = d; }
   });
@@ -185,6 +190,15 @@ async function buildPack() {
     (byModel[e.model] = byModel[e.model] || []).push(comp ? comp.name : nk);
   });
 
+  // --- joining-location rollup (col 14, where candidates joined) ---
+  const byLocation = {};
+  Object.values(companies).forEach((c) => {
+    for (const [loc, n] of Object.entries(c.byLocation)) {
+      const L = (byLocation[loc] = byLocation[loc] || { location: loc, joinees: 0, companies: 0 });
+      L.joinees += n; L.companies += 1;
+    }
+  });
+
   // --- totals ---
   const totals = {
     companies: Object.keys(companies).length,
@@ -226,7 +240,7 @@ async function buildPack() {
   const kb = {};
   KB_TABS.forEach((t, i) => { kb[t.toLowerCase()] = rowsToObjects(kbRows[i]); });
 
-  return { at: Date.now(), totals, companies, industries, byHQ, byFY, byModel, clientsWorked, engagement, kb };
+  return { at: Date.now(), totals, companies, industries, byHQ, byFY, byModel, byLocation, clientsWorked, engagement, kb };
 }
 
 async function getPack(force = false) {
@@ -337,7 +351,16 @@ function deriveScope(userText, pack) {
   const fyToks = userText.match(/\b\d{4}-\d{4}\b/g) || [];
   const fys = Object.keys(pack.byFY || {}).filter((fy) => fyToks.includes(fy));
 
-  return { companies: comps, industries: [...matchedIndustries], widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys };
+  // joining locations (India cities, col 14)
+  const locations = [];
+  for (const loc of Object.keys(pack.byLocation || {})) {
+    const toks = toWords(loc).split(' ').filter(Boolean);
+    if (toks.join('').length < 3) continue;
+    const re = new RegExp('\\b' + toks.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^a-z0-9]+') + '\\b', 'i');
+    if (re.test(lowerText)) locations.push(loc);
+  }
+
+  return { companies: comps, industries: [...matchedIndustries], widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations };
 }
 
 function companyBlock(c) {
@@ -353,6 +376,10 @@ function companyBlock(c) {
   const sen = topEntries(c.bySeniority, 6);
   if (sen.length) lines.push('By seniority (heuristic, approximate): ' + sen.map(([d, n]) => `${d} (${n})`).join('; '));
   if (c.exp && c.exp.count) lines.push(`Years of experience closed: avg ${(c.exp.sum / c.exp.count).toFixed(1)} yrs, range ${c.exp.min}-${c.exp.max} yrs (across ${c.exp.count} with data)`);
+  const locs = topEntries(c.byLocation, 6);
+  if (locs.length) lines.push('Joining locations (where they joined): ' + locs.map(([l, n]) => `${l} (${n})`).join('; '));
+  const prevs = topEntries(c.byPrev, 6);
+  if (prevs.length) lines.push('Sourced from (previous companies): ' + prevs.map(([p, n]) => `${p} (${n})`).join('; '));
   return lines.join('\n');
 }
 
@@ -423,6 +450,16 @@ function assembleContext(userText, pack) {
   // 3e) Specific financial year(s) asked about
   if (scope.fys && scope.fys.length) {
     parts.push('## MATCHED FINANCIAL YEAR (exact)\n' + scope.fys.map((fy) => { const F = pack.byFY[fy]; return `${fy}: ${F.joinees} joinees, ${F.drops} drops, ${fmtRs(F.revenue)}`; }).join('\n'));
+  }
+
+  // 3f) Joining location (India city where candidates joined)
+  if (scope.locations && scope.locations.length) {
+    const blocks = scope.locations.map((loc) => {
+      const L = pack.byLocation[loc];
+      const tops = Object.values(pack.companies).filter((c) => c.byLocation[loc]).sort((a, b) => (b.byLocation[loc] || 0) - (a.byLocation[loc] || 0)).slice(0, 12).map((c) => `${c.name} (${c.byLocation[loc]})`).join('; ');
+      return `### ${loc}\nJoinees hired into this location: ${L.joinees} across ${L.companies} companies\nTop companies: ${tops}`;
+    });
+    parts.push('## JOINING LOCATION (exact - India city where candidates joined)\n' + blocks.join('\n\n'));
   }
 
   // If nothing matched at all, give a compact industry summary so general questions still work

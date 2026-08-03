@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { google } = require('googleapis');
-const { streamChat } = require('./netlify/lib/llm');
+const { chat } = require('./netlify/lib/llm');
 const { prepare, parseSections, logQuery, saveFeedback, recentQueries } = require('./netlify/lib/copilot');
 
 const app = express();
@@ -44,31 +44,23 @@ app.post('/api/auth', (req, res) => {
   res.json({ token });
 });
 
-// ── POST /api/ask (BD Copilot, streaming SSE) ──
+// ── POST /api/ask (BD Copilot, non-streaming JSON) ──
 app.post('/api/ask', async (req, res) => {
   if (!validateBasicAuth(req)) return res.status(401).json({ error: 'Unauthorized' });
   const question = String((req.body && req.body.question) || '').trim();
   const history = Array.isArray(req.body && req.body.history) ? req.body.history.slice(-8) : [];
   const user = String((req.body && req.body.user) || '');
   if (!question) return res.status(400).json({ error: 'Empty question' });
-
-  let prep;
-  try { prep = await prepare(question, history); }
-  catch (e) { return res.status(500).json({ error: 'prepare failed: ' + (e.message || 'unknown') }); }
-
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  const send = (o) => res.write('data: ' + JSON.stringify(o) + '\n\n');
-
-  let full = '';
-  try { full = await streamChat(prep.messages, { maxTokens: 1600 }, (d) => send({ t: 'delta', v: d })); }
-  catch (e) { send({ t: 'error', v: 'Copilot failed: ' + (e.message || 'unknown') }); return res.end(); }
-
-  const parsed = parseSections(full);
-  send({ t: 'done', confidence: parsed.confidence, type: parsed.type, sources: parsed.sources, industry: prep.industryTag });
-  res.end();
-  logQuery({ question, type: parsed.type, industry: prep.industryTag, confidence: parsed.confidence, sources: parsed.sources, user });
+  try {
+    const prep = await prepare(question, history);
+    const raw = await chat(prep.messages, { temperature: 0.3, jsonMode: false, maxTokens: 1600 });
+    const parsed = parseSections(raw);
+    await logQuery({ question, type: parsed.type, industry: prep.industryTag, confidence: parsed.confidence, sources: parsed.sources, user });
+    res.json({ grounded: parsed.grounded, opinion: parsed.opinion, confidence: parsed.confidence, sources: parsed.sources, industry: prep.industryTag, type: parsed.type });
+  } catch (e) {
+    console.error('ask error:', e);
+    res.status(500).json({ error: 'Copilot failed: ' + (e.message || 'unknown') });
+  }
 });
 
 // ── POST /api/feedback ──
