@@ -219,12 +219,15 @@ async function buildPack() {
     }
     const out = [];
     subs.forEach(({ ci, name }) => {
-      const set = new Set();
+      const companies = new Set();
+      const capabilities = new Set(); // requisition roles we can fill (col ci+1)
       for (let r = 2; r < rows.length; r++) {
         const comp = rows[r] && rows[r][ci] ? String(rows[r][ci]).trim() : '';
-        if (comp) set.add(comp);
+        const cap = rows[r] && rows[r][ci + 1] ? String(rows[r][ci + 1]).trim() : '';
+        if (comp) companies.add(comp);
+        if (cap && !cap.toLowerCase().includes('requisition')) capabilities.add(cap);
       }
-      if (set.size) out.push({ subsector: name, companies: [...set] });
+      if (companies.size || capabilities.size) out.push({ subsector: name, companies: [...companies], capabilities: [...capabilities] });
     });
     if (out.length) clientsWorked[INDUSTRY_SHEETS[i]] = out;
   });
@@ -478,10 +481,14 @@ function assembleContext(userText, pack) {
   const cwBlocks = [];
   for (const [sheetName, subs] of Object.entries(pack.clientsWorked)) {
     if (cwIndustries.length && !matchIndustryLoose(sheetName, cwIndustries)) continue;
-    if (!cwIndustries.length) continue; // don't dump all 1,687 for general questions
-    cwBlocks.push(`### ${sheetName}\n` + subs.map((s) => `${s.subsector}: ${s.companies.slice(0, 40).join(', ')}`).join('\n'));
+    if (!cwIndustries.length) continue; // only inject for scoped industries
+    cwBlocks.push(`### ${sheetName}\n` + subs.map((s) => {
+      const comp = s.companies && s.companies.length ? `  Companies worked with: ${s.companies.slice(0, 40).join(', ')}` : '';
+      const cap = s.capabilities && s.capabilities.length ? `  Requisition capabilities (roles we can fill): ${s.capabilities.slice(0, 40).join(', ')}` : '';
+      return `${s.subsector}:\n${[comp, cap].filter(Boolean).join('\n')}`;
+    }).join('\n'));
   }
-  if (cwBlocks.length) parts.push('## CLIENTS WORKED WITH (touched, not necessarily closed)\n' + cwBlocks.join('\n\n'));
+  if (cwBlocks.length) parts.push('## CLIENTS WORKED WITH + REQUISITION CAPABILITIES (touched, not necessarily closed; capabilities = roles we can fill)\n' + cwBlocks.join('\n\n'));
 
   // Intent: is this a "how to sell / what do I say" question, or a pure data lookup?
   // Advice questions get the full playbook + doctrine + general method stories.

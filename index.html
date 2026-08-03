@@ -255,15 +255,16 @@
     .btn-ask:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* ── COPILOT ── */
-    .cp-layout { display: flex; gap: 20px; align-items: flex-start; }
-    .cp-sidebar { width: 260px; flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; position: sticky; top: 76px; max-height: calc(100vh - 120px); overflow-y: auto; }
+    body.cp-mode { overflow: hidden; }
+    .cp-layout { display: flex; gap: 20px; align-items: stretch; height: calc(100vh - 235px); min-height: 380px; }
+    .cp-sidebar { width: 260px; flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; overflow-y: auto; }
     .cp-sidebar.collapsed { display: none; }
     .cp-sidebar-title { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-light); margin-bottom: 12px; }
-    .cp-main { flex: 1; min-width: 0; }
+    .cp-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
     .cp-side-toggle { background: var(--surface); border: 1px solid var(--border-mid); border-radius: 8px; width: 38px; height: 38px; font-size: 1rem; cursor: pointer; color: var(--text-mid); flex-shrink: 0; margin-top: 2px; }
     .cp-side-toggle:hover { border-color: var(--accent); color: var(--accent); }
-    .copilot-messages { display: flex; flex-direction: column; gap: 18px; padding: 4px 0 24px; min-height: 200px; }
-    .cp-empty { margin: 40px auto; text-align: center; color: var(--text-light); max-width: 520px; }
+    .copilot-messages { flex: 1; overflow-y: auto; padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
+    .cp-empty { margin: auto; text-align: center; color: var(--text-light); max-width: 520px; }
     .cp-empty-icon { font-size: 1.8rem; margin-bottom: 8px; color: var(--accent); }
     .cp-empty p { font-size: 0.9rem; margin-bottom: 18px; }
     .cp-examples { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
@@ -284,7 +285,7 @@
     .cp-typing { align-self: flex-start; color: var(--text-light); font-size: 0.85rem; font-style: italic; }
     .cp-error { align-self: stretch; background: #fbeaea; border: 1px solid #e6c4c4; color: #a53a3a; padding: 12px 15px; border-radius: 10px; font-size: 0.85rem; }
 
-    .copilot-inputbar { position: sticky; bottom: 16px; z-index: 10; display: flex; gap: 10px; align-items: flex-end; background: var(--surface); border: 1px solid var(--border-mid); border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,0.09); padding: 12px 14px; }
+    .copilot-inputbar { border-top: 1px solid var(--border); padding: 14px 18px; display: flex; gap: 10px; align-items: flex-end; background: var(--surface); flex-shrink: 0; }
     .cp-sidebar #cp-recent .cp-recent-chip { max-width: 100%; width: 100%; margin-bottom: 8px; box-shadow: none; }
     #cp-input { flex: 1; resize: none; max-height: 140px; border: 1px solid var(--border-mid); border-radius: 9px; padding: 10px 13px; font-family: 'DM Sans', sans-serif; font-size: 0.9rem; color: var(--text-dark); background: var(--bg); line-height: 1.5; }
     #cp-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,90,61,0.1); }
@@ -619,6 +620,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
+  document.body.classList.toggle('cp-mode', name === 'copilot');
   if (name === 'visual') renderVisual();
 }
 
@@ -636,6 +638,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    document.body.classList.toggle('cp-mode', tab.dataset.tab === 'copilot');
     if (tab.dataset.tab === 'visual') renderVisual();
   });
 });
@@ -1593,7 +1596,7 @@ function mdLite(s) {
   return out;
 }
 
-function cpScroll() { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); }
+function cpScroll() { const m = document.getElementById('cp-messages'); if (m) m.scrollTop = m.scrollHeight; }
 
 function cpAddUser(text) {
   const empty = document.getElementById('cp-empty'); if (empty) empty.remove();
