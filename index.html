@@ -297,7 +297,10 @@
     .cp-recent-grid { display: flex; flex-wrap: wrap; gap: 8px; }
     .cp-recent-chip { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 9px 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 0.82rem; color: var(--text-dark); max-width: 340px; transition: border-color 0.15s; box-shadow: var(--shadow); }
     .cp-recent-chip:hover { border-color: var(--accent); }
-    .cp-recent-chip .q { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cp-recent-chip { max-width: 440px; }
+    .cp-recent-chip .q { display: block; white-space: normal; line-height: 1.35; }
+    .cp-thinking { color: var(--text-light); font-style: italic; animation: cpPulse 1.2s ease-in-out infinite; }
+    @keyframes cpPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
     .cp-recent-tags { display: flex; gap: 5px; margin-top: 6px; }
     .cp-recent-tags i { font-style: normal; font-size: 0.66rem; background: var(--tag-bg); color: var(--text-mid); padding: 2px 7px; border-radius: 100px; }
 
@@ -1624,7 +1627,7 @@ async function askCopilot(question) {
   document.getElementById('cp-input').value = '';
 
   const wrap = document.createElement('div'); wrap.className = 'cp-msg-bot';
-  wrap.innerHTML = '<div class="cp-grounded"><h4>Say on the call</h4><div class="cp-grounded-body">…</div></div>'
+  wrap.innerHTML = '<div class="cp-grounded"><h4>Say on the call</h4><div class="cp-grounded-body"><span class="cp-thinking">Thinking…</span></div></div>'
     + '<div class="cp-opinion" style="display:none"><h4>Your read <span class="cp-conf"></span></h4><div class="cp-opinion-body"></div></div>'
     + '<div class="cp-actions" style="display:none"></div><div class="cp-sources"></div>';
   document.getElementById('cp-messages').appendChild(wrap); cpScroll();
@@ -1701,7 +1704,14 @@ async function loadRecent() {
     ALL_QUERIES = data.queries || [];
   } catch { return; }
   const box = document.getElementById('cp-recent');
-  const recent = ALL_QUERIES.slice(0, 10);
+  // de-duplicate by question text (keep newest), then take 10
+  const seen = new Set(); const recent = [];
+  for (const q of ALL_QUERIES) {
+    const k = (q.question || '').trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k); recent.push(q);
+    if (recent.length >= 10) break;
+  }
   if (!recent.length) { box.innerHTML = ''; return; }
   const chip = (q) => {
     const tags = [q.type, (q.industry && q.industry !== 'General' && q.industry !== 'Skill-wide') ? q.industry : '']
@@ -1709,7 +1719,16 @@ async function loadRecent() {
     return `<button class="cp-recent-chip" data-q="${escHtml(q.question).replace(/"/g, '&quot;')}"><span class="q">${escHtml(q.question)}</span><span class="cp-recent-tags">${tags}</span></button>`;
   };
   box.innerHTML = '<div class="cp-recent-title">Recent questions (everyone)</div><div class="cp-recent-grid">' + recent.map(chip).join('') + '</div>';
-  box.querySelectorAll('.cp-recent-chip').forEach(c => c.addEventListener('click', () => askCopilot(c.dataset.q)));
+  box.querySelectorAll('.cp-recent-chip').forEach(c => c.addEventListener('click', () => fillCopilotInput(c.dataset.q)));
+}
+
+// Put a question into the input for the user to review/edit and send themselves.
+function fillCopilotInput(q) {
+  switchTab('copilot');
+  const inp = document.getElementById('cp-input');
+  inp.value = q;
+  inp.style.height = 'auto'; inp.style.height = Math.min(inp.scrollHeight, 140) + 'px';
+  inp.focus();
 }
 
 // View-all modal
@@ -1742,8 +1761,7 @@ function renderViewAllList() {
   }).join('') || '<div class="accordion-empty">No queries yet.</div>';
   document.querySelectorAll('#cp-modal-list .cp-q-row').forEach(r => r.addEventListener('click', () => {
     cpModal.classList.remove('open');
-    switchTab('copilot');
-    askCopilot(r.dataset.q);
+    fillCopilotInput(r.dataset.q);
   }));
 }
 

@@ -272,6 +272,9 @@ const STOPWORDS = new Set([
   'all', 'some', 'more', 'most', 'versus', 'done', 'work', 'worked', 'placed', 'placements',
   'candidates', 'people', 'name', 'names', 'which', 'where', 'when', 'seniority', 'senior', 'junior',
   'model', 'models', 'track', 'record', 'numbers', 'experience', 'clients',
+  'should', 'would', 'could', 'approach', 'new', 'give', 'given', 'need', 'needs', 'want', 'help', 'helps',
+  'info', 'pattern', 'patterns', 'level', 'levels', 'further', 'across', 'company', 'tell', 'range', 'ranges',
+  'let', 'know', 'about', 'like', 'good', 'best', 'closed', 'close',
 ]);
 function tokenize(t) {
   return [...new Set(String(t || '').toLowerCase().split(/[^a-z0-9+#]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w)))];
@@ -311,6 +314,7 @@ function deriveScope(userText, pack) {
     const re = phraseRegex(I.name);
     if (re && re.test(lowerText)) matchedIndustries.add(I.name);
   }
+  const namedIndustries = [...matchedIndustries]; // industries explicitly named in the query (for the tag)
   matchedCompanies.forEach((c) => { if (c.industry) matchedIndustries.add(c.industry); });
   // adjacency widen
   const widened = new Set(matchedIndustries);
@@ -360,7 +364,7 @@ function deriveScope(userText, pack) {
     if (re.test(lowerText)) locations.push(loc);
   }
 
-  return { companies: comps, industries: [...matchedIndustries], widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations };
+  return { companies: comps, industries: [...matchedIndustries], namedIndustries, widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations };
 }
 
 function companyBlock(c) {

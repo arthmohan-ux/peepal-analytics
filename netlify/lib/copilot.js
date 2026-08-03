@@ -18,7 +18,7 @@ HARD RULES:
 
 OUTPUT FORMAT — respond in EXACTLY this shape, nothing before or after:
 [[SAY]]
-<the call-ready answer, in markdown. Lead with the single most apt point, then secondary and tertiary, most-apt first. Concrete numbers. Client-safe story wording. Short and punchy.>
+<the call-ready answer, in markdown. Lead with the single most apt point, then secondary and tertiary, most-apt first. BE SPECIFIC TO THIS QUESTION: use concrete numbers, named proof points, real client examples and stacks from the context. Do NOT write generic boilerplate that could apply to any prospect. If it's a strategy/advice question with no specific client, still ground it in concrete Peepal proof (specific metrics, named sub-ICP companies, real stacks) rather than vague claims. Client-safe wording. Short and punchy.>
 [[READ]]
 <your internal read for the rep: how to play it, which service to steer to, ICP/stage/targeting cautions. May use INTERNAL-ONLY doctrine. If data is thin, say so and stay conservative.>
 [[META]]
@@ -36,9 +36,22 @@ async function prepare(question, history) {
     else if (m.role === 'assistant') messages.push({ role: 'assistant', content: String(m.content).slice(0, 1200) });
   });
   messages.push({ role: 'user', content: question });
-  // industry tag from deterministic scope (reliable), not the model
-  const industryTag = scope.industries[0] || (scope.skills && scope.skills.length ? 'Skill-wide' : 'General');
-  return { messages, scope, industryTag };
+  return { messages, scope, industryTag: tagIndustry(question, scope) };
+}
+
+// Industry tag for logging — robust: sub-vertical map first, then a directly named
+// industry, then a single clearly-named company's industry, else General.
+function tagIndustry(question, scope) {
+  const q = (question || '').toLowerCase();
+  if (/\b(what can you|what do you|what all|help with|your capabilities|who are you|how do you work)\b/.test(q)) return 'General';
+  const subICP = [
+    ['semiconductor', 'Manufacturing'], ['medtech', 'Manufacturing'], ['medical device', 'Manufacturing'], ['med device', 'Manufacturing'],
+    ['fintech', 'BFSI'], ['insurance', 'BFSI'], ['healthcare', 'Pharma'],
+  ];
+  for (const [kw, ind] of subICP) if (q.includes(kw)) return ind;
+  if (scope.namedIndustries && scope.namedIndustries.length) return scope.namedIndustries[0];
+  if (scope.companies && scope.companies.length === 1 && scope.companies[0].industry) return scope.companies[0].industry;
+  return 'General';
 }
 
 // Split the delimited model output into sections.
