@@ -17,6 +17,13 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min; sheet changes ~monthly, so this 
 // ── small helpers ─────────────────────────────────────────────────────────────
 function safeFloat(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function toWords(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+// Word-boundary phrase matcher so "Xperi" doesn't match "experience" and "EY GDS" matches "ey gds".
+function phraseRegex(name) {
+  const toks = toWords(name).split(' ').filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (!toks.length || toks.join('').length < 3) return null;
+  return new RegExp('\\b' + toks.join('[^a-z0-9]+') + '\\b', 'i');
+}
 function safeDate(v) {
   if (!v) return null;
   const d = new Date(v);
@@ -79,24 +86,31 @@ async function buildPack() {
       companies[k] = {
         name: String(name).trim(), industry: '', hq: '',
         joinees: 0, drops: 0, revenue: 0,
-        byDesig: {}, byRole: {}, bySeniority: {},
+        byDesig: {}, byRole: {}, bySeniority: {}, skillIndex: {},
         firstJoin: null, lastJoin: null,
       };
     }
     return companies[k];
   }
 
+  const byFY = {}; // financial-year rollup: fy -> {joinees, drops, revenue}
+  const isFY = (v) => /^\d{4}-\d{4}$/.test(String(v || '').trim());
+
   joineeRows.slice(1).forEach((r) => {
     if (!r || !r[0] || !r[6]) return;
     const c = ensure(r[6]);
     c.joinees += 1;
     c.revenue += safeFloat(r[9]);
+    if (isFY(r[4])) { const fy = String(r[4]).trim(); (byFY[fy] = byFY[fy] || { joinees: 0, drops: 0, revenue: 0 }); byFY[fy].joinees++; byFY[fy].revenue += safeFloat(r[9]); }
     if (!c.industry && r[8]) c.industry = String(r[8]).trim();
     if (!c.hq && r[7]) c.hq = String(r[7]).trim();
     const desig = r[11] ? String(r[11]).trim() : '';
     const role = r[12] ? String(r[12]).trim() : '';
     if (desig) { c.byDesig[desig] = (c.byDesig[desig] || 0) + 1; const t = seniorityTier(desig); c.bySeniority[t] = (c.bySeniority[t] || 0) + 1; }
     if (role) c.byRole[role] = (c.byRole[role] || 0) + 1;
+    // exact skill/role index: one entry per joinee (designation + function combined), no double count
+    const combo = ((desig || '') + ' ' + (role || '')).toLowerCase().replace(/\s+/g, ' ').trim();
+    if (combo) c.skillIndex[combo] = (c.skillIndex[combo] || 0) + 1;
     const d = safeDate(r[0]);
     if (d) { if (!c.firstJoin || d < c.firstJoin) c.firstJoin = d; if (!c.lastJoin || d > c.lastJoin) c.lastJoin = d; }
   });
@@ -107,6 +121,7 @@ async function buildPack() {
     c.drops += 1;
     if (!c.industry && r[9]) c.industry = String(r[9]).trim();
     if (!c.hq && r[7]) c.hq = String(r[7]).trim();
+    if (isFY(r[4])) { const fy = String(r[4]).trim(); (byFY[fy] = byFY[fy] || { joinees: 0, drops: 0, revenue: 0 }); byFY[fy].drops++; }
   });
 
   // --- engagement (model + dates) ---
@@ -138,6 +153,22 @@ async function buildPack() {
       .sort((a, b) => b.joinees - a.joinees)
       .slice(0, 25)
       .map((c) => ({ name: c.name, joinees: c.joinees, drops: c.drops, revenue: c.revenue }));
+  });
+
+  // --- HQ rollup (from company-level HQ) ---
+  const byHQ = {};
+  Object.values(companies).forEach((c) => {
+    const hq = c.hq || 'Unknown';
+    if (!byHQ[hq]) byHQ[hq] = { hq, companies: 0, joinees: 0, drops: 0, revenue: 0 };
+    const H = byHQ[hq]; H.companies++; H.joinees += c.joinees; H.drops += c.drops; H.revenue += c.revenue;
+  });
+
+  // --- engagement model -> clients ---
+  const byModel = {};
+  Object.entries(engagement).forEach(([nk, e]) => {
+    if (!e.model) return;
+    const comp = Object.values(companies).find((c) => norm(c.name) === nk);
+    (byModel[e.model] = byModel[e.model] || []).push(comp ? comp.name : nk);
   });
 
   // --- totals ---
@@ -181,7 +212,7 @@ async function buildPack() {
   const kb = {};
   KB_TABS.forEach((t, i) => { kb[t.toLowerCase()] = rowsToObjects(kbRows[i]); });
 
-  return { at: Date.now(), totals, companies, industries, clientsWorked, engagement, kb };
+  return { at: Date.now(), totals, companies, industries, byHQ, byFY, byModel, clientsWorked, engagement, kb };
 }
 
 async function getPack(force = false) {
@@ -202,20 +233,48 @@ function topEntries(obj, n) {
   return Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n);
 }
 
+// ── skill / role search across joinee designations + functions (exact) ────────
+const STOPWORDS = new Set([
+  'what', 'have', 'has', 'had', 'we', 'our', 'us', 'the', 'and', 'or', 'for', 'with', 'from',
+  'are', 'is', 'do', 'does', 'did', 'how', 'many', 'much', 'who', 'can', 'you', 'they', 'them',
+  'their', 'been', 'closed', 'closure', 'closures', 'close', 'joinee', 'joinees', 'joined',
+  'hire', 'hires', 'hiring', 'hired', 'role', 'roles', 'client', 'clients', 'company', 'companies',
+  'industry', 'industries', 'revenue', 'offer', 'offers', 'drop', 'drops', 'about', 'around',
+  'give', 'show', 'list', 'tell', 'say', 'this', 'that', 'these', 'those', 'get', 'got', 'any',
+  'all', 'some', 'more', 'most', 'versus', 'done', 'work', 'worked', 'placed', 'placements',
+  'candidates', 'people', 'name', 'names', 'which', 'where', 'when', 'seniority', 'senior', 'junior',
+  'model', 'models', 'track', 'record', 'numbers', 'experience', 'clients',
+]);
+function tokenize(t) {
+  return [...new Set(String(t || '').toLowerCase().split(/[^a-z0-9+#]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w)))];
+}
+function skillSearch(term, pack) {
+  const re = new RegExp('\\b' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+  let total = 0; const perCo = {}; const byInd = {};
+  for (const c of Object.values(pack.companies)) {
+    let n = 0;
+    for (const [combo, cnt] of Object.entries(c.skillIndex)) if (re.test(combo)) n += cnt;
+    if (n > 0) { perCo[c.name] = n; total += n; const ind = c.industry || 'Unknown'; byInd[ind] = (byInd[ind] || 0) + n; }
+  }
+  return { term, total, top: Object.entries(perCo).sort((a, b) => b[1] - a[1]).slice(0, 15), byInd };
+}
+
 // ── scope + context assembly ──────────────────────────────────────────────────
 // Derive which companies / industries the conversation is about, from ALL user text.
 function deriveScope(userText, pack) {
-  const t = ' ' + norm(userText) + ' ';
+  const lowerText = ' ' + toWords(userText) + ' ';
   const matchedCompanies = [];
   for (const c of Object.values(pack.companies)) {
-    const nk = norm(c.name);
-    if (nk.length >= 3 && t.includes(nk)) matchedCompanies.push(c);
+    const re = phraseRegex(c.name);
+    if (re && re.test(lowerText)) matchedCompanies.push(c);
   }
-  // industries: match by name token
+  // industries: word-boundary match on the industry name (skip junk/placeholder values)
+  const JUNK_INDUSTRIES = new Set(['unknown', 'check', 'test', 'tbd', 'na', 'n/a', '-', '']);
   const matchedIndustries = new Set();
   for (const I of Object.values(pack.industries)) {
-    const ik = norm(I.name);
-    if (ik && ik !== 'unknown' && t.includes(ik)) matchedIndustries.add(I.name);
+    if (!I.name || JUNK_INDUSTRIES.has(I.name.toLowerCase().trim())) continue;
+    const re = phraseRegex(I.name);
+    if (re && re.test(lowerText)) matchedIndustries.add(I.name);
   }
   matchedCompanies.forEach((c) => { if (c.industry) matchedIndustries.add(c.industry); });
   // adjacency widen
@@ -226,7 +285,38 @@ function deriveScope(userText, pack) {
   // dedupe companies, cap
   const seen = new Set();
   const comps = matchedCompanies.filter((c) => { const k = norm(c.name); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 8);
-  return { companies: comps, industries: [...matchedIndustries], widenedIndustries: [...widened] };
+
+  // skill / role / skill-stack matches (e.g. "java", "guidewire", "sap", "cyber")
+  const compNorm = norm(comps.map((c) => c.name).join(' '));
+  const skills = [];
+  for (const tok of tokenize(userText)) {
+    if (compNorm.includes(tok)) continue; // already covered by a company match
+    const s = skillSearch(tok, pack);
+    if (s.total >= 2) skills.push(s);
+  }
+  skills.sort((a, b) => b.total - a.total);
+
+  // HQ / geography (allow 2-char codes like UK, but deny pronoun collisions)
+  const hqs = [];
+  for (const hq of Object.keys(pack.byHQ || {})) {
+    if (hq === 'Unknown') continue;
+    const toks = toWords(hq).split(' ').filter(Boolean);
+    const joined = toks.join('');
+    if (joined.length < 2 || ['us', 'we', 'it', 'in', 'on', 'the'].includes(joined)) continue;
+    const re = new RegExp('\\b' + toks.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^a-z0-9]+') + '\\b', 'i');
+    if (re.test(lowerText)) hqs.push(hq);
+  }
+  // engagement models
+  const models = [];
+  for (const m of Object.keys(pack.byModel || {})) {
+    const re = phraseRegex(m);
+    if (re && re.test(lowerText)) models.push(m);
+  }
+  // financial years (explicit YYYY-YYYY tokens)
+  const fyToks = userText.match(/\b\d{4}-\d{4}\b/g) || [];
+  const fys = Object.keys(pack.byFY || {}).filter((fy) => fyToks.includes(fy));
+
+  return { companies: comps, industries: [...matchedIndustries], widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys };
 }
 
 function companyBlock(c) {
@@ -264,8 +354,12 @@ function assembleContext(userText, pack) {
   const scope = deriveScope(userText, pack);
   const parts = [];
 
-  // 1) Totals (always)
+  // 1) Totals (always) + compact by-financial-year (cheap, enables trend/year questions)
   parts.push('## FIRM-WIDE TOTALS (exact)\n' + `Companies: ${pack.totals.companies} | Joinees: ${pack.totals.joinees} | Offer drops: ${pack.totals.drops} | Revenue: ${fmtRs(pack.totals.revenue)}`);
+  const fyAll = Object.keys(pack.byFY || {}).sort();
+  if (fyAll.length) {
+    parts.push('## BY FINANCIAL YEAR (exact, all years)\n' + fyAll.map((fy) => { const F = pack.byFY[fy]; return `${fy}: ${F.joinees} joinees, ${F.drops} drops, ${fmtRs(F.revenue)}`; }).join('\n'));
+  }
 
   // 2) Scoped companies (exact numbers)
   if (scope.companies.length) {
@@ -277,8 +371,39 @@ function assembleContext(userText, pack) {
     const blocks = scope.industries.map((n) => pack.industries[n]).filter(Boolean).map(industryBlock);
     if (blocks.length) parts.push('## MATCHED INDUSTRIES (exact numbers)\n' + blocks.join('\n\n'));
   }
-  // If nothing matched, give a compact industry summary so general questions still work
-  if (!scope.companies.length && !scope.industries.length) {
+  // 3b) Skill / role / stack matches (exact search of designations + functions)
+  if (scope.skills && scope.skills.length) {
+    const blocks = scope.skills.map((s) => {
+      const top = s.top.map(([name, n]) => `${name} (${n})`).join('; ');
+      const inds = Object.entries(s.byInd).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([i, n]) => `${i} (${n})`).join('; ');
+      return `### "${s.term}" — ${s.total} closures (joinees whose designation/function mentions "${s.term}")\nTop companies: ${top}\nBy industry: ${inds}`;
+    });
+    parts.push('## SKILL / ROLE MATCHES (exact - searched across all joinee designations & functions)\n' + blocks.join('\n\n'));
+  }
+
+  // 3c) HQ / geography (exact)
+  if (scope.hqs && scope.hqs.length) {
+    const blocks = scope.hqs.map((hq) => {
+      const H = pack.byHQ[hq];
+      const tops = Object.values(pack.companies).filter((c) => (c.hq || 'Unknown') === hq).sort((a, b) => b.joinees - a.joinees).slice(0, 15).map((c) => `${c.name} (${c.joinees})`).join('; ');
+      return `### ${hq}\nCompanies: ${H.companies} | Joinees: ${H.joinees} | Drops: ${H.drops} | Revenue: ${fmtRs(H.revenue)}\nTop companies: ${tops}`;
+    });
+    parts.push('## HQ / GEOGRAPHY (exact)\n' + blocks.join('\n\n'));
+  }
+
+  // 3d) Engagement model (exact)
+  if (scope.models && scope.models.length) {
+    const blocks = scope.models.map((m) => `### ${m}\nClients (${pack.byModel[m].length}): ${pack.byModel[m].slice(0, 50).join(', ')}`);
+    parts.push('## ENGAGEMENT MODEL (exact)\n' + blocks.join('\n\n'));
+  }
+
+  // 3e) Specific financial year(s) asked about
+  if (scope.fys && scope.fys.length) {
+    parts.push('## MATCHED FINANCIAL YEAR (exact)\n' + scope.fys.map((fy) => { const F = pack.byFY[fy]; return `${fy}: ${F.joinees} joinees, ${F.drops} drops, ${fmtRs(F.revenue)}`; }).join('\n'));
+  }
+
+  // If nothing matched at all, give a compact industry summary so general questions still work
+  if (!scope.companies.length && !scope.industries.length && !(scope.skills && scope.skills.length) && !(scope.hqs && scope.hqs.length) && !(scope.models && scope.models.length)) {
     const rows = Object.values(pack.industries).sort((a, b) => b.revenue - a.revenue)
       .map((I) => `${I.name}: ${I.companies} cos, ${I.joinees} joinees, ${I.drops} drops, ${fmtRs(I.revenue)}`);
     parts.push('## INDUSTRY SUMMARY (exact)\n' + rows.join('\n'));
