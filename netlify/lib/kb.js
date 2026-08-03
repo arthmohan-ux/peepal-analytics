@@ -87,6 +87,7 @@ async function buildPack() {
         name: String(name).trim(), industry: '', hq: '',
         joinees: 0, drops: 0, revenue: 0,
         byDesig: {}, byRole: {}, bySeniority: {}, skillIndex: {},
+        exp: { sum: 0, count: 0, min: null, max: null }, expByCombo: {},
         firstJoin: null, lastJoin: null,
       };
     }
@@ -111,6 +112,19 @@ async function buildPack() {
     // exact skill/role index: one entry per joinee (designation + function combined), no double count
     const combo = ((desig || '') + ' ' + (role || '')).toLowerCase().replace(/\s+/g, ' ').trim();
     if (combo) c.skillIndex[combo] = (c.skillIndex[combo] || 0) + 1;
+    // years of experience (col 13) — per company and per skill-combo
+    const yoe = parseFloat(r[13]);
+    if (!isNaN(yoe) && yoe >= 0 && yoe < 60) {
+      c.exp.sum += yoe; c.exp.count += 1;
+      c.exp.min = c.exp.min === null ? yoe : Math.min(c.exp.min, yoe);
+      c.exp.max = c.exp.max === null ? yoe : Math.max(c.exp.max, yoe);
+      if (combo) {
+        const e = (c.expByCombo[combo] = c.expByCombo[combo] || { sum: 0, count: 0, min: null, max: null });
+        e.sum += yoe; e.count += 1;
+        e.min = e.min === null ? yoe : Math.min(e.min, yoe);
+        e.max = e.max === null ? yoe : Math.max(e.max, yoe);
+      }
+    }
     const d = safeDate(r[0]);
     if (d) { if (!c.firstJoin || d < c.firstJoin) c.firstJoin = d; if (!c.lastJoin || d > c.lastJoin) c.lastJoin = d; }
   });
@@ -251,12 +265,19 @@ function tokenize(t) {
 function skillSearch(term, pack) {
   const re = new RegExp('\\b' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
   let total = 0; const perCo = {}; const byInd = {};
+  let expSum = 0, expCount = 0, expMin = null, expMax = null;
   for (const c of Object.values(pack.companies)) {
     let n = 0;
-    for (const [combo, cnt] of Object.entries(c.skillIndex)) if (re.test(combo)) n += cnt;
+    for (const [combo, cnt] of Object.entries(c.skillIndex)) {
+      if (!re.test(combo)) continue;
+      n += cnt;
+      const e = c.expByCombo[combo];
+      if (e && e.count) { expSum += e.sum; expCount += e.count; expMin = expMin === null ? e.min : Math.min(expMin, e.min); expMax = expMax === null ? e.max : Math.max(expMax, e.max); }
+    }
     if (n > 0) { perCo[c.name] = n; total += n; const ind = c.industry || 'Unknown'; byInd[ind] = (byInd[ind] || 0) + n; }
   }
-  return { term, total, top: Object.entries(perCo).sort((a, b) => b[1] - a[1]).slice(0, 15), byInd };
+  const yoe = expCount ? { avg: (expSum / expCount).toFixed(1), min: expMin, max: expMax, n: expCount } : null;
+  return { term, total, top: Object.entries(perCo).sort((a, b) => b[1] - a[1]).slice(0, 15), byInd, yoe };
 }
 
 // ── scope + context assembly ──────────────────────────────────────────────────
@@ -331,6 +352,7 @@ function companyBlock(c) {
   if (roles.length) lines.push('Top functions/roles (exact counts): ' + roles.map(([d, n]) => `${d} (${n})`).join('; '));
   const sen = topEntries(c.bySeniority, 6);
   if (sen.length) lines.push('By seniority (heuristic, approximate): ' + sen.map(([d, n]) => `${d} (${n})`).join('; '));
+  if (c.exp && c.exp.count) lines.push(`Years of experience closed: avg ${(c.exp.sum / c.exp.count).toFixed(1)} yrs, range ${c.exp.min}-${c.exp.max} yrs (across ${c.exp.count} with data)`);
   return lines.join('\n');
 }
 
@@ -376,7 +398,8 @@ function assembleContext(userText, pack) {
     const blocks = scope.skills.map((s) => {
       const top = s.top.map(([name, n]) => `${name} (${n})`).join('; ');
       const inds = Object.entries(s.byInd).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([i, n]) => `${i} (${n})`).join('; ');
-      return `### "${s.term}" — ${s.total} closures (joinees whose designation/function mentions "${s.term}")\nTop companies: ${top}\nBy industry: ${inds}`;
+      const yoeLine = s.yoe ? `\nYears of experience: avg ${s.yoe.avg} yrs, range ${s.yoe.min}-${s.yoe.max} yrs (across ${s.yoe.n} with data)` : '';
+      return `### "${s.term}" — ${s.total} closures (joinees whose designation/function mentions "${s.term}")\nTop companies: ${top}\nBy industry: ${inds}${yoeLine}`;
     });
     parts.push('## SKILL / ROLE MATCHES (exact - searched across all joinee designations & functions)\n' + blocks.join('\n\n'));
   }

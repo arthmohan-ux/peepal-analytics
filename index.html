@@ -282,6 +282,40 @@
     #cp-input { flex: 1; resize: none; max-height: 140px; border: 1px solid var(--border-mid); border-radius: 9px; padding: 10px 13px; font-family: 'DM Sans', sans-serif; font-size: 0.9rem; color: var(--text-dark); background: var(--bg); line-height: 1.5; }
     #cp-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,90,61,0.1); }
     #cp-send { padding: 10px 20px; }
+
+    /* answer actions (thumbs) */
+    .cp-actions { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+    .cp-thumb { background: none; border: 1px solid var(--border-mid); border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 0.9rem; transition: all 0.15s; }
+    .cp-thumb:hover { border-color: var(--accent); }
+    .cp-thumb.active { background: var(--accent-bg); border-color: var(--accent); }
+    .cp-thumb-status { font-size: 0.74rem; color: var(--text-light); }
+
+    /* recent questions strip */
+    .cp-recent { margin-top: 20px; }
+    .cp-recent:empty { display: none; }
+    .cp-recent-title { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-light); margin-bottom: 10px; }
+    .cp-recent-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .cp-recent-chip { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 9px 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 0.82rem; color: var(--text-dark); max-width: 340px; transition: border-color 0.15s; box-shadow: var(--shadow); }
+    .cp-recent-chip:hover { border-color: var(--accent); }
+    .cp-recent-chip .q { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cp-recent-tags { display: flex; gap: 5px; margin-top: 6px; }
+    .cp-recent-tags i { font-style: normal; font-size: 0.66rem; background: var(--tag-bg); color: var(--text-mid); padding: 2px 7px; border-radius: 100px; }
+
+    /* view-all modal */
+    .cp-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 400; display: none; align-items: center; justify-content: center; }
+    .cp-modal-overlay.open { display: flex; }
+    .cp-modal { background: var(--surface); border-radius: 14px; width: 92%; max-width: 820px; max-height: 82vh; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,0.2); overflow: hidden; }
+    .cp-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 22px; border-bottom: 1px solid var(--border); }
+    .cp-modal-title { font-family: 'Instrument Serif', serif; font-size: 1.3rem; }
+    .cp-modal-filters { display: flex; gap: 10px; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .cp-modal-count { font-size: 0.78rem; color: var(--text-light); margin-left: auto; }
+    .cp-modal-list { overflow-y: auto; padding: 8px 22px 22px; }
+    .cp-q-row { padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+    .cp-q-row:hover .cp-q-text { color: var(--accent); }
+    .cp-q-text { font-size: 0.88rem; color: var(--text-dark); }
+    .cp-q-meta { display: flex; gap: 6px; align-items: center; margin-top: 5px; }
+    .cp-q-meta i { font-style: normal; font-size: 0.66rem; background: var(--tag-bg); color: var(--text-mid); padding: 2px 7px; border-radius: 100px; }
+    .cp-q-time { font-size: 0.7rem; color: var(--text-light); }
   </style>
 </head>
 <body>
@@ -414,9 +448,15 @@
 
     <!-- BD COPILOT -->
     <div class="tab-panel" id="tab-copilot">
-      <div class="page-title">
-        <h1>BD Copilot</h1>
-        <p>Ask about what we've done — by company, industry, role or seniority — and get call-ready talking points plus an internal read.</p>
+      <div class="page-title" style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">
+        <div>
+          <h1>BD Copilot</h1>
+          <p>Ask about what we've done — by company, industry, role or seniority — and get call-ready talking points plus an internal read.</p>
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          <button class="btn-secondary" id="cp-refresh">↺ New chat</button>
+          <button class="btn-secondary" id="cp-viewall">View all queries</button>
+        </div>
       </div>
       <div class="copilot-wrap">
         <div class="copilot-messages" id="cp-messages">
@@ -435,6 +475,23 @@
           <textarea id="cp-input" rows="1" placeholder="Ask the Copilot... (Enter to send, Shift+Enter for a new line)"></textarea>
           <button id="cp-send" class="btn-ask">Send</button>
         </div>
+      </div>
+      <div class="cp-recent" id="cp-recent"></div>
+    </div>
+
+    <!-- VIEW-ALL MODAL -->
+    <div class="cp-modal-overlay" id="cp-modal-overlay">
+      <div class="cp-modal">
+        <div class="cp-modal-head">
+          <div class="cp-modal-title">All queries</div>
+          <button class="sidebar-close" id="cp-modal-close">✕</button>
+        </div>
+        <div class="cp-modal-filters">
+          <select class="industry-sel" id="cp-filter-type" style="min-width:180px"><option value="">All types</option></select>
+          <select class="industry-sel" id="cp-filter-ind" style="min-width:180px"><option value="">All industries</option></select>
+          <span class="cp-modal-count" id="cp-modal-count"></span>
+        </div>
+        <div class="cp-modal-list" id="cp-modal-list"></div>
       </div>
     </div>
 
@@ -1525,16 +1582,36 @@ function cpAddUser(text) {
   document.getElementById('cp-messages').appendChild(div); cpScroll();
 }
 
-function cpAddBot({ grounded, opinion, confidence, sources_used }) {
-  const wrap = document.createElement('div'); wrap.className = 'cp-msg-bot';
-  let html = `<div class="cp-grounded"><h4>Say on the call</h4>${mdLite(grounded)}</div>`;
-  if (opinion && opinion.trim()) {
-    const conf = (confidence || 'medium').toLowerCase();
-    html += `<div class="cp-opinion"><h4>Your read <span class="cp-conf ${conf}">${conf}</span></h4>${mdLite(opinion)}</div>`;
-  }
-  if (sources_used && sources_used.length) html += `<div class="cp-sources">Sources: ${sources_used.join(', ')}</div>`;
-  wrap.innerHTML = html;
-  document.getElementById('cp-messages').appendChild(wrap); cpScroll();
+function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function currentUser() { try { return atob(authToken).split(':')[0] || ''; } catch { return ''; } }
+
+// Split streamed delimited text into grounded / opinion for live rendering.
+function splitSections(t) {
+  t = String(t || '');
+  const sayI = t.indexOf('[[SAY]]'), readI = t.indexOf('[[READ]]'), metaI = t.indexOf('[[META]]');
+  const gStart = sayI >= 0 ? sayI + 7 : 0;
+  const gEnd = readI >= 0 ? readI : (metaI >= 0 ? metaI : t.length);
+  let grounded = t.slice(gStart, gEnd).trim();
+  let opinion = '';
+  if (readI >= 0) { const oEnd = metaI >= 0 ? metaI : t.length; opinion = t.slice(readI + 8, oEnd).trim(); }
+  return { grounded, opinion };
+}
+
+function buildThumbs(container, question, answer, sources) {
+  container.innerHTML = '<button class="cp-thumb" data-v="up" title="Good answer">👍</button><button class="cp-thumb" data-v="down" title="Wrong or weak">👎</button><span class="cp-thumb-status"></span>';
+  container.querySelectorAll('.cp-thumb').forEach(btn => btn.addEventListener('click', () => {
+    const vote = btn.dataset.v;
+    const note = window.prompt(vote === 'up' ? 'What made this answer good? (optional)' : 'What was wrong or missing? (optional)') || '';
+    container.querySelectorAll('.cp-thumb').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const status = container.querySelector('.cp-thumb-status'); status.textContent = 'Saving…';
+    fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + authToken },
+      body: JSON.stringify({ question, answer, vote, note, sources, user: currentUser() }),
+    }).then(r => { status.textContent = r.ok ? 'Thanks — saved' : 'Save failed'; })
+      .catch(() => { status.textContent = 'Save failed'; });
+  }));
 }
 
 async function askCopilot(question) {
@@ -1546,26 +1623,58 @@ async function askCopilot(question) {
   cpAddUser(q);
   document.getElementById('cp-input').value = '';
 
-  const typing = document.createElement('div'); typing.className = 'cp-typing'; typing.textContent = 'Thinking…';
-  document.getElementById('cp-messages').appendChild(typing); cpScroll();
+  const wrap = document.createElement('div'); wrap.className = 'cp-msg-bot';
+  wrap.innerHTML = '<div class="cp-grounded"><h4>Say on the call</h4><div class="cp-grounded-body">…</div></div>'
+    + '<div class="cp-opinion" style="display:none"><h4>Your read <span class="cp-conf"></span></h4><div class="cp-opinion-body"></div></div>'
+    + '<div class="cp-actions" style="display:none"></div><div class="cp-sources"></div>';
+  document.getElementById('cp-messages').appendChild(wrap); cpScroll();
+  const gBody = wrap.querySelector('.cp-grounded-body'), oBox = wrap.querySelector('.cp-opinion'),
+        oBody = wrap.querySelector('.cp-opinion-body'), confEl = wrap.querySelector('.cp-conf'),
+        srcEl = wrap.querySelector('.cp-sources'), actions = wrap.querySelector('.cp-actions');
 
+  let full = '', meta = null;
   try {
     const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + authToken },
-      body: JSON.stringify({ question: q, history: cpHistory }),
+      body: JSON.stringify({ question: q, history: cpHistory, user: currentUser() }),
     });
-    typing.remove();
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Request failed');
-    const data = await res.json();
-    cpAddBot(data);
+    if (!res.ok || !res.body) { const j = await res.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + res.status)); }
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const line = chunk.split('\n').find(l => l.startsWith('data:')); if (!line) continue;
+        let obj; try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        if (obj.t === 'delta') {
+          full += obj.v;
+          const s = splitSections(full);
+          gBody.innerHTML = mdLite(s.grounded || '…');
+          if (s.opinion) { oBox.style.display = ''; oBody.innerHTML = mdLite(s.opinion); }
+          cpScroll();
+        } else if (obj.t === 'done') { meta = obj; }
+        else if (obj.t === 'error') { throw new Error(obj.v); }
+      }
+    }
+    const s = splitSections(full);
+    gBody.innerHTML = mdLite(s.grounded || 'No answer.');
+    if (s.opinion) { oBox.style.display = ''; oBody.innerHTML = mdLite(s.opinion); }
+    const conf = (meta && meta.confidence) || 'medium';
+    confEl.textContent = conf; confEl.className = 'cp-conf ' + conf;
+    const srcs = (meta && meta.sources) || '';
+    srcEl.textContent = srcs ? ('Sources: ' + srcs) : '';
+    actions.style.display = '';
+    buildThumbs(actions, q, s.grounded + (s.opinion ? '\n\n[READ] ' + s.opinion : ''), srcs);
     cpHistory.push({ role: 'user', content: q });
-    cpHistory.push({ role: 'assistant', content: data.grounded || '' });
+    cpHistory.push({ role: 'assistant', content: s.grounded || '' });
     if (cpHistory.length > 16) cpHistory = cpHistory.slice(-16);
+    loadRecent();
   } catch (err) {
-    typing.remove();
-    const e = document.createElement('div'); e.className = 'cp-error'; e.textContent = 'Copilot error: ' + (err.message || 'unknown') + '. Check that the API key and env vars are set.';
-    document.getElementById('cp-messages').appendChild(e); cpScroll();
+    wrap.innerHTML = '<div class="cp-error">Copilot error: ' + escHtml(err.message || 'unknown') + '</div>';
+    cpScroll();
   } finally {
     cpBusy = false;
     document.getElementById('cp-send').disabled = false;
@@ -1583,6 +1692,83 @@ document.getElementById('cp-input').addEventListener('input', function() {
   this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 140) + 'px';
 });
 document.querySelectorAll('.cp-chip').forEach(chip => chip.addEventListener('click', () => askCopilot(chip.textContent)));
+
+// New chat (refresh)
+document.getElementById('cp-refresh').addEventListener('click', () => {
+  cpHistory = [];
+  document.getElementById('cp-messages').innerHTML = `
+    <div class="cp-empty" id="cp-empty">
+      <div class="cp-empty-icon">◇</div>
+      <p>Ask a question to get grounded talking points for a BD call.</p>
+      <div class="cp-examples">
+        <button class="cp-chip">What have we done for EY GDS?</button>
+        <button class="cp-chip">Who else in BFSI can I name-drop?</button>
+        <button class="cp-chip">Client says they have a strong internal team — what do I say?</button>
+        <button class="cp-chip">Our track record in aviation</button>
+      </div>
+    </div>`;
+  document.querySelectorAll('#cp-messages .cp-chip').forEach(chip => chip.addEventListener('click', () => askCopilot(chip.textContent)));
+});
+
+// ── RECENT QUESTIONS + VIEW ALL ──
+let ALL_QUERIES = [];
+
+async function loadRecent() {
+  try {
+    const res = await fetch('/api/queries', { headers: { 'Authorization': 'Basic ' + authToken } });
+    if (!res.ok) return;
+    const data = await res.json();
+    ALL_QUERIES = data.queries || [];
+  } catch { return; }
+  const box = document.getElementById('cp-recent');
+  const recent = ALL_QUERIES.slice(0, 10);
+  if (!recent.length) { box.innerHTML = ''; return; }
+  const chip = (q) => {
+    const tags = [q.type, (q.industry && q.industry !== 'General' && q.industry !== 'Skill-wide') ? q.industry : '']
+      .filter(Boolean).map(t => `<i>${escHtml(t)}</i>`).join('');
+    return `<button class="cp-recent-chip" data-q="${escHtml(q.question).replace(/"/g, '&quot;')}"><span class="q">${escHtml(q.question)}</span><span class="cp-recent-tags">${tags}</span></button>`;
+  };
+  box.innerHTML = '<div class="cp-recent-title">Recent questions (everyone)</div><div class="cp-recent-grid">' + recent.map(chip).join('') + '</div>';
+  box.querySelectorAll('.cp-recent-chip').forEach(c => c.addEventListener('click', () => askCopilot(c.dataset.q)));
+}
+
+// View-all modal
+const cpModal = document.getElementById('cp-modal-overlay');
+document.getElementById('cp-viewall').addEventListener('click', () => { renderViewAll(); cpModal.classList.add('open'); });
+document.getElementById('cp-modal-close').addEventListener('click', () => cpModal.classList.remove('open'));
+cpModal.addEventListener('click', (e) => { if (e.target === cpModal) cpModal.classList.remove('open'); });
+document.getElementById('cp-filter-type').addEventListener('change', renderViewAllList);
+document.getElementById('cp-filter-ind').addEventListener('change', renderViewAllList);
+
+function renderViewAll() {
+  const types = [...new Set(ALL_QUERIES.map(q => q.type).filter(Boolean))].sort();
+  const inds = [...new Set(ALL_QUERIES.map(q => q.industry).filter(v => v && v !== 'General' && v !== 'Skill-wide'))].sort();
+  const tSel = document.getElementById('cp-filter-type'), iSel = document.getElementById('cp-filter-ind');
+  tSel.innerHTML = '<option value="">All types</option>' + types.map(t => `<option>${escHtml(t)}</option>`).join('');
+  iSel.innerHTML = '<option value="">All industries</option>' + inds.map(t => `<option>${escHtml(t)}</option>`).join('');
+  renderViewAllList();
+}
+
+function renderViewAllList() {
+  const ft = document.getElementById('cp-filter-type').value;
+  const fi = document.getElementById('cp-filter-ind').value;
+  const rows = ALL_QUERIES.filter(q => (!ft || q.type === ft) && (!fi || q.industry === fi));
+  document.getElementById('cp-modal-count').textContent = rows.length + ' quer' + (rows.length === 1 ? 'y' : 'ies');
+  document.getElementById('cp-modal-list').innerHTML = rows.map(q => {
+    const tags = [q.type, (q.industry && q.industry !== 'General' && q.industry !== 'Skill-wide') ? q.industry : '', q.confidence]
+      .filter(Boolean).map(t => `<i>${escHtml(t)}</i>`).join('');
+    const time = q.timestamp ? new Date(q.timestamp).toLocaleString() : '';
+    return `<div class="cp-q-row" data-q="${escHtml(q.question).replace(/"/g, '&quot;')}"><div class="cp-q-text">${escHtml(q.question)}</div><div class="cp-q-meta">${tags}<span class="cp-q-time">${escHtml(time)}</span></div></div>`;
+  }).join('') || '<div class="accordion-empty">No queries yet.</div>';
+  document.querySelectorAll('#cp-modal-list .cp-q-row').forEach(r => r.addEventListener('click', () => {
+    cpModal.classList.remove('open');
+    switchTab('copilot');
+    askCopilot(r.dataset.q);
+  }));
+}
+
+// load recent when entering the Copilot tab
+document.querySelector('.tab[data-tab="copilot"]').addEventListener('click', loadRecent);
 </script>
 </body>
 </html>
