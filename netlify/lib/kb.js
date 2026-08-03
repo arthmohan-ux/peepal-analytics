@@ -419,15 +419,20 @@ function assembleContext(userText, pack) {
   }
   if (cwBlocks.length) parts.push('## CLIENTS WORKED WITH (touched, not necessarily closed)\n' + cwBlocks.join('\n\n'));
 
-  // 5) Case studies / methods (Sources) — bd_usage index always; full rows for scoped clients/industries + widened
+  // Intent: is this a "how to sell / what do I say" question, or a pure data lookup?
+  // Advice questions get the full playbook + doctrine + general method stories.
+  // Data lookups stay lean (big token saving) and skip the selling material.
+  const hasData = scope.companies.length || scope.industries.length || (scope.skills && scope.skills.length) || (scope.hqs && scope.hqs.length) || (scope.fys && scope.fys.length);
+  const adviceIntent = /\b(say|said|saying|pitch|pitching|objection|convince|respond|response|angle|position|positioning|sell|selling|talk|handle|name.?drop|reactivat|dormant|follow.?up|nurtur|approach|advice|strategy|strateg|reframe|icp|qualify|qualified|target|meeting|first call|cold call|what do i|how do i|how should|what should|should i say)\b/i.test(userText) || !hasData;
+
+  // 5) Case studies / methods (Sources)
   const src = pack.kb.sources || [];
-  const usageIndex = src.map((s) => `${s.source_id} [${s.type}] ${s.client || s.industry || 'general'}: ${s.bd_usage}`).join('\n');
-  parts.push('## STORY INDEX (pick the story whose PROBLEM mirrors the prospect)\n' + usageIndex);
+  parts.push('## STORY INDEX (pick the story whose PROBLEM mirrors the prospect)\n' + src.map((s) => `${s.source_id} [${s.type}] ${s.client || s.industry || 'general'}: ${s.bd_usage}`).join('\n'));
   const scopedClientsNorm = new Set(scope.companies.map((c) => norm(c.name)));
   const fullSources = src.filter((s) => {
     if (s.client && scopedClientsNorm.has(norm(s.client))) return true;
     if (s.industry && matchIndustryLoose(s.industry, scope.widenedIndustries)) return true;
-    if (!s.client && !s.industry) return true; // general methods
+    if (!s.client && !s.industry) return adviceIntent; // general methods only for advice questions
     return false;
   });
   if (fullSources.length) {
@@ -440,26 +445,29 @@ function assembleContext(userText, pack) {
     ).join('\n\n'));
   }
 
-  // 6) Doctrine — always-on general rows + scoped internal rows
+  // 6) Doctrine — core definitions always; the rest (ICP/PEEPAL Way/commercials/targeting) only for advice questions
   const doc = pack.kb.doctrine || [];
-  const alwaysCats = new Set(['definition', 'icp_firmographic', 'excluded_industry', 'sweet_spot', 'service_term', 'service_line', 'service_fit', 'peepal_way', 'company', 'commercials']);
-  const docAlways = doc.filter((d) => alwaysCats.has(d.category));
-  const docScoped = doc.filter((d) => !alwaysCats.has(d.category) && (
+  const coreCats = new Set(['definition', 'service_term', 'service_line']);
+  const adviceCats = new Set(['icp_firmographic', 'excluded_industry', 'sweet_spot', 'service_fit', 'peepal_way', 'company', 'commercials']);
+  const docBase = doc.filter((d) => coreCats.has(d.category) || (adviceIntent && adviceCats.has(d.category)));
+  const docScoped = doc.filter((d) => !coreCats.has(d.category) && !adviceCats.has(d.category) && (
     (d.examples && scope.companies.some((c) => norm(d.examples).includes(norm(c.name)))) ||
     matchIndustryLoose(d.industry || '', scope.widenedIndustries) ||
-    ['stage', 'converting', 'not_converting', 'sub_icp', 'contact', 'timing'].includes(d.category)
+    (adviceIntent && ['stage', 'converting', 'not_converting', 'sub_icp', 'contact', 'timing'].includes(d.category))
   ));
   const docLine = (d) => `- [${d.category}] ${d.item}${d.detail ? ': ' + d.detail : ''}${d.examples ? ' | e.g. ' + d.examples : ''}${d.action ? ' | ACTION: ' + d.action : ''}${d.audience === 'internal' ? ' | (INTERNAL ONLY)' : ''}`;
-  const docRows = [...docAlways, ...docScoped];
+  const docRows = [...docBase, ...docScoped];
   if (docRows.length) parts.push('## DOCTRINE (ICP, targeting, services, commercials, PEEPAL Way)\n' + docRows.map(docLine).join('\n'));
 
-  // 7) Playbook — the always-useful how-to-sell chapters
-  const pb = pack.kb.playbook || [];
-  const pbCats = new Set(['mindset', 'first_call', 'discovery', 'data_usage', 'meeting_run', 'followup', 'reliability', 'reactivation', 'at_risk', 'delivery', 'research']);
-  const pbRows = pb.filter((p) => pbCats.has(p.category));
-  if (pbRows.length) parts.push('## PLAYBOOK (how to sell)\n' + pbRows.map((p) => `- [${p.category}] ${p.item}${p.detail ? ': ' + p.detail : ''}${p.action ? ' | ' + p.action : ''}`).join('\n'));
+  // 7) Playbook — the how-to-sell chapters, only for advice questions
+  if (adviceIntent) {
+    const pb = pack.kb.playbook || [];
+    const pbCats = new Set(['mindset', 'first_call', 'discovery', 'data_usage', 'meeting_run', 'followup', 'reliability', 'reactivation', 'at_risk', 'delivery', 'research']);
+    const pbRows = pb.filter((p) => pbCats.has(p.category));
+    if (pbRows.length) parts.push('## PLAYBOOK (how to sell)\n' + pbRows.map((p) => `- [${p.category}] ${p.item}${p.detail ? ': ' + p.detail : ''}${p.action ? ' | ' + p.action : ''}`).join('\n'));
+  }
 
-  return { context: parts.join('\n\n'), scope };
+  return { context: parts.join('\n\n'), scope, adviceIntent };
 }
 
 module.exports = { getPack, assembleContext, fmtRs };
