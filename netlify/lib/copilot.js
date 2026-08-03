@@ -18,7 +18,7 @@ HARD RULES:
 
 OUTPUT FORMAT — respond in EXACTLY this shape, nothing before or after:
 [[SAY]]
-<the call-ready answer, in markdown. Lead with the single most apt point, then secondary and tertiary, most-apt first. BE SPECIFIC TO THIS QUESTION: use concrete numbers, named proof points, real client examples and stacks from the context. Do NOT write generic boilerplate that could apply to any prospect. If it's a strategy/advice question with no specific client, still ground it in concrete Peepal proof (specific metrics, named sub-ICP companies, real stacks) rather than vague claims. Client-safe wording. Short and punchy.>
+<the call-ready answer, in markdown. Lead with the single most apt point, then secondary and tertiary, most-apt first. BE SPECIFIC TO THIS QUESTION: use concrete numbers, named proof points, real client examples and stacks from the context. Do NOT write generic boilerplate that could apply to any prospect. If it's a strategy/advice question with no specific client, still ground it in concrete Peepal proof (specific metrics, named sub-ICP companies, real stacks) rather than vague claims. Client-safe wording. Short and punchy. FORMATTING: wrap hard facts and numbers in **bold**, and use *italics* to emphasise the key phrase to lean on. Do not over-format — bold the facts, italicise sparingly.>
 [[READ]]
 <your internal read for the rep: how to play it, which service to steer to, ICP/stage/targeting cautions. May use INTERNAL-ONLY doctrine. If data is thin, say so and stay conservative.>
 [[META]]

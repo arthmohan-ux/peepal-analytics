@@ -255,9 +255,15 @@
     .btn-ask:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* ── COPILOT ── */
-    .copilot-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; height: calc(100vh - 260px); min-height: 460px; overflow: hidden; }
-    .copilot-messages { flex: 1; overflow-y: auto; padding: 24px 26px; display: flex; flex-direction: column; gap: 18px; }
-    .cp-empty { margin: auto; text-align: center; color: var(--text-light); max-width: 520px; }
+    .cp-layout { display: flex; gap: 20px; align-items: flex-start; }
+    .cp-sidebar { width: 260px; flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; position: sticky; top: 76px; max-height: calc(100vh - 120px); overflow-y: auto; }
+    .cp-sidebar.collapsed { display: none; }
+    .cp-sidebar-title { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-light); margin-bottom: 12px; }
+    .cp-main { flex: 1; min-width: 0; }
+    .cp-side-toggle { background: var(--surface); border: 1px solid var(--border-mid); border-radius: 8px; width: 38px; height: 38px; font-size: 1rem; cursor: pointer; color: var(--text-mid); flex-shrink: 0; margin-top: 2px; }
+    .cp-side-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .copilot-messages { display: flex; flex-direction: column; gap: 18px; padding: 4px 0 24px; min-height: 200px; }
+    .cp-empty { margin: 40px auto; text-align: center; color: var(--text-light); max-width: 520px; }
     .cp-empty-icon { font-size: 1.8rem; margin-bottom: 8px; color: var(--accent); }
     .cp-empty p { font-size: 0.9rem; margin-bottom: 18px; }
     .cp-examples { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
@@ -278,7 +284,8 @@
     .cp-typing { align-self: flex-start; color: var(--text-light); font-size: 0.85rem; font-style: italic; }
     .cp-error { align-self: stretch; background: #fbeaea; border: 1px solid #e6c4c4; color: #a53a3a; padding: 12px 15px; border-radius: 10px; font-size: 0.85rem; }
 
-    .copilot-inputbar { border-top: 1px solid var(--border); padding: 14px 18px; display: flex; gap: 10px; align-items: flex-end; background: var(--surface); }
+    .copilot-inputbar { position: sticky; bottom: 16px; z-index: 10; display: flex; gap: 10px; align-items: flex-end; background: var(--surface); border: 1px solid var(--border-mid); border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,0.09); padding: 12px 14px; }
+    .cp-sidebar #cp-recent .cp-recent-chip { max-width: 100%; width: 100%; margin-bottom: 8px; box-shadow: none; }
     #cp-input { flex: 1; resize: none; max-height: 140px; border: 1px solid var(--border-mid); border-radius: 9px; padding: 10px 13px; font-family: 'DM Sans', sans-serif; font-size: 0.9rem; color: var(--text-dark); background: var(--bg); line-height: 1.5; }
     #cp-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,90,61,0.1); }
     #cp-send { padding: 10px 20px; }
@@ -452,34 +459,42 @@
     <!-- BD COPILOT -->
     <div class="tab-panel" id="tab-copilot">
       <div class="page-title" style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">
-        <div>
-          <h1>BD Copilot</h1>
-          <p>Ask about what we've done — by company, industry, role or seniority — and get call-ready talking points plus an internal read.</p>
+        <div style="display:flex; align-items:flex-start; gap:12px;">
+          <button class="cp-side-toggle" id="cp-sidebar-toggle" title="Recent questions">☰</button>
+          <div>
+            <h1>BD Copilot</h1>
+            <p>Ask about what we've done — by company, industry, role or seniority — and get call-ready talking points plus an internal read.</p>
+          </div>
         </div>
         <div style="display:flex; gap:8px; flex-shrink:0;">
           <button class="btn-secondary" id="cp-refresh">↺ New chat</button>
           <button class="btn-secondary" id="cp-viewall">View all queries</button>
         </div>
       </div>
-      <div class="copilot-wrap">
-        <div class="copilot-messages" id="cp-messages">
-          <div class="cp-empty" id="cp-empty">
-            <div class="cp-empty-icon">◇</div>
-            <p>Ask a question to get grounded talking points for a BD call.</p>
-            <div class="cp-examples">
-              <button class="cp-chip">What have we done for EY GDS?</button>
-              <button class="cp-chip">Who else in BFSI can I name-drop?</button>
-              <button class="cp-chip">Client says they have a strong internal team — what do I say?</button>
-              <button class="cp-chip">Our track record in aviation</button>
+      <div class="cp-layout">
+        <aside class="cp-sidebar collapsed" id="cp-sidebar">
+          <div class="cp-sidebar-title">Recent questions</div>
+          <div id="cp-recent"></div>
+        </aside>
+        <div class="cp-main">
+          <div class="copilot-messages" id="cp-messages">
+            <div class="cp-empty" id="cp-empty">
+              <div class="cp-empty-icon">◇</div>
+              <p>Ask a question to get grounded talking points for a BD call.</p>
+              <div class="cp-examples">
+                <button class="cp-chip">What have we done for EY GDS?</button>
+                <button class="cp-chip">Who else in BFSI can I name-drop?</button>
+                <button class="cp-chip">Client says they have a strong internal team — what do I say?</button>
+                <button class="cp-chip">Our track record in aviation</button>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="copilot-inputbar">
-          <textarea id="cp-input" rows="1" placeholder="Ask the Copilot... (Enter to send, Shift+Enter for a new line)"></textarea>
-          <button id="cp-send" class="btn-ask">Send</button>
+          <div class="copilot-inputbar">
+            <textarea id="cp-input" rows="1" placeholder="Ask the Copilot... (Enter to send, Shift+Enter for a new line)"></textarea>
+            <button id="cp-send" class="btn-ask">Send</button>
+          </div>
         </div>
       </div>
-      <div class="cp-recent" id="cp-recent"></div>
     </div>
 
     <!-- VIEW-ALL MODAL -->
@@ -1566,6 +1581,7 @@ function mdLite(s) {
   // minimal, safe markdown: escape, then **bold**, bullet lists, line breaks
   let html = String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
   const lines = html.split('\n');
   let out = '', inList = false;
   lines.forEach(line => {
@@ -1577,7 +1593,7 @@ function mdLite(s) {
   return out;
 }
 
-function cpScroll() { const m = document.getElementById('cp-messages'); m.scrollTop = m.scrollHeight; }
+function cpScroll() { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); }
 
 function cpAddUser(text) {
   const empty = document.getElementById('cp-empty'); if (empty) empty.remove();
@@ -1718,7 +1734,7 @@ async function loadRecent() {
       .filter(Boolean).map(t => `<i>${escHtml(t)}</i>`).join('');
     return `<button class="cp-recent-chip" data-q="${escHtml(q.question).replace(/"/g, '&quot;')}"><span class="q">${escHtml(q.question)}</span><span class="cp-recent-tags">${tags}</span></button>`;
   };
-  box.innerHTML = '<div class="cp-recent-title">Recent questions (everyone)</div><div class="cp-recent-grid">' + recent.map(chip).join('') + '</div>';
+  box.innerHTML = recent.map(chip).join('');
   box.querySelectorAll('.cp-recent-chip').forEach(c => c.addEventListener('click', () => fillCopilotInput(c.dataset.q)));
 }
 
@@ -1764,6 +1780,13 @@ function renderViewAllList() {
     fillCopilotInput(r.dataset.q);
   }));
 }
+
+// collapsible recent-questions sidebar
+document.getElementById('cp-sidebar-toggle').addEventListener('click', () => {
+  const sb = document.getElementById('cp-sidebar');
+  sb.classList.toggle('collapsed');
+  if (!sb.classList.contains('collapsed')) loadRecent();
+});
 
 // load recent when entering the Copilot tab
 document.querySelector('.tab[data-tab="copilot"]').addEventListener('click', loadRecent);
