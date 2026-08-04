@@ -408,7 +408,8 @@ function matchIndustryLoose(rowIndustry, scopeIndustries) {
 
 function assembleContext(userText, pack) {
   const scope = deriveScope(userText, pack);
-  const parts = [];
+  const parts = [];        // CLIENT-SAFE bin — usable in SAY (spoken to the client) and READ
+  const internalParts = []; // INTERNAL-ONLY bin — READ only, never sent to the SAY call
 
   // 1) Totals (always) + compact by-financial-year (cheap, enables trend/year questions)
   parts.push('## FIRM-WIDE TOTALS (exact)\n' + `Companies: ${pack.totals.companies} | Joinees: ${pack.totals.joinees} | Offer drops: ${pack.totals.drops} | Revenue: ${fmtRs(pack.totals.revenue)}`);
@@ -472,8 +473,11 @@ function assembleContext(userText, pack) {
   // If nothing matched at all, give a compact industry summary so general questions still work
   if (!scope.companies.length && !scope.industries.length && !(scope.skills && scope.skills.length) && !(scope.hqs && scope.hqs.length) && !(scope.models && scope.models.length)) {
     const rows = Object.values(pack.industries).sort((a, b) => b.revenue - a.revenue)
-      .map((I) => `${I.name}: ${I.companies} cos, ${I.joinees} joinees, ${I.drops} drops, ${fmtRs(I.revenue)}`);
-    parts.push('## INDUSTRY SUMMARY (exact)\n' + rows.join('\n'));
+      .map((I) => {
+        const top = (I.topCompanies || []).slice(0, 5).map((c) => `${c.name} (${c.joinees})`).join(', ');
+        return `${I.name}: ${I.companies} cos, ${I.joinees} joinees, ${I.drops} drops, ${fmtRs(I.revenue)}${top ? ' | top clients: ' + top : ''}`;
+      });
+    parts.push('## INDUSTRY SUMMARY (exact — use the named top clients as proof points)\n' + rows.join('\n'));
   }
 
   // 4) Clients Worked With — only for scoped industries (touched, not necessarily closed)
@@ -507,28 +511,39 @@ function assembleContext(userText, pack) {
     return false;
   });
   if (fullSources.length) {
+    // client-safe half of each story (problem, intervention, client-safe result, when to use)
     parts.push('## RELEVANT STORIES (full)\n' + fullSources.map((s) =>
       `### ${s.source_id} - ${s.client || s.industry || 'general'} [${s.type}]\n` +
       `Problem: ${s.problem}\nIntervention: ${s.intervention}\n` +
-      (s.result_client_safe ? `SAY THIS (client-safe): ${s.result_client_safe}\n` : '') +
-      (s.result_internal ? `INTERNAL ONLY (do not say to a client): ${s.result_internal}\n` : '') +
+      (s.result_client_safe ? `Client-safe result: ${s.result_client_safe}\n` : '') +
       `When to use: ${s.bd_usage}`
     ).join('\n\n'));
+    // internal-only half (exact/approximate case metrics + handling notes) → internal bin
+    const internalStories = fullSources.filter((s) => s.result_internal);
+    if (internalStories.length) {
+      internalParts.push('## CASE METRICS (INTERNAL — rep-only, never spoken to the client)\n' +
+        internalStories.map((s) => `### ${s.source_id} - ${s.client || s.industry || 'general'}\n${s.result_internal}`).join('\n'));
+    }
   }
 
   // 6) Doctrine — core definitions always; the rest (ICP/PEEPAL Way/commercials/targeting) only for advice questions
   const doc = pack.kb.doctrine || [];
   const coreCats = new Set(['definition', 'service_term', 'service_line']);
   const adviceCats = new Set(['icp_firmographic', 'excluded_industry', 'sweet_spot', 'service_fit', 'peepal_way', 'company', 'commercials']);
-  const docBase = doc.filter((d) => coreCats.has(d.category) || (adviceIntent && adviceCats.has(d.category)));
+  const wantsCommercials = /\b(commercial|commercials|fee|fees|pricing|price|rate|rates|commission|charge|charges|cost|margin|discount|percentage)\b/i.test(userText);
+  const docBase = doc.filter((d) => coreCats.has(d.category) || (adviceIntent && adviceCats.has(d.category)) || (wantsCommercials && (d.category === 'commercials' || d.category === 'service_line')));
   const docScoped = doc.filter((d) => !coreCats.has(d.category) && !adviceCats.has(d.category) && (
     (d.examples && scope.companies.some((c) => norm(d.examples).includes(norm(c.name)))) ||
     matchIndustryLoose(d.industry || '', scope.widenedIndustries) ||
-    (adviceIntent && ['stage', 'converting', 'not_converting', 'sub_icp', 'contact', 'timing'].includes(d.category))
+    ((adviceIntent || hasData) && ['stage', 'converting', 'not_converting', 'sub_icp', 'contact', 'timing'].includes(d.category))
   ));
-  const docLine = (d) => `- [${d.category}] ${d.item}${d.detail ? ': ' + d.detail : ''}${d.examples ? ' | e.g. ' + d.examples : ''}${d.action ? ' | ACTION: ' + d.action : ''}${d.audience === 'internal' ? ' | (INTERNAL ONLY)' : ''}`;
+  const docLine = (d) => `- [${d.category}] ${d.item}${d.detail ? ': ' + d.detail : ''}${d.examples ? ' | e.g. ' + d.examples : ''}${d.action ? ' | ACTION: ' + d.action : ''}`;
   const docRows = [...docBase, ...docScoped];
-  if (docRows.length) parts.push('## DOCTRINE (ICP, targeting, services, commercials, PEEPAL Way)\n' + docRows.map(docLine).join('\n'));
+  // route doctrine by audience: general → client-safe bin, internal → internal bin
+  const docClientSafe = docRows.filter((d) => d.audience !== 'internal');
+  const docInternal = docRows.filter((d) => d.audience === 'internal');
+  if (docClientSafe.length) parts.push('## DOCTRINE (ICP, services, PEEPAL Way, targeting)\n' + docClientSafe.map(docLine).join('\n'));
+  if (docInternal.length) internalParts.push('## INTERNAL DOCTRINE (fees, skip/not-converting status, targeting — rep-only, never spoken to the client)\n' + docInternal.map(docLine).join('\n'));
 
   // 7) Playbook — the how-to-sell chapters, only for advice questions
   if (adviceIntent) {
@@ -538,7 +553,7 @@ function assembleContext(userText, pack) {
     if (pbRows.length) parts.push('## PLAYBOOK (how to sell)\n' + pbRows.map((p) => `- [${p.category}] ${p.item}${p.detail ? ': ' + p.detail : ''}${p.action ? ' | ' + p.action : ''}`).join('\n'));
   }
 
-  return { context: parts.join('\n\n'), scope, adviceIntent };
+  return { clientSafe: parts.join('\n\n'), internal: internalParts.join('\n\n'), scope, adviceIntent };
 }
 
 module.exports = { getPack, assembleContext, fmtRs };

@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const { google } = require('googleapis');
 const { chat } = require('./netlify/lib/llm');
-const { prepare, parseSections, logQuery, saveFeedback, recentQueries } = require('./netlify/lib/copilot');
+const { prepare, cleanSay, parseRead, logQuery, saveFeedback, recentQueries } = require('./netlify/lib/copilot');
 
 const app = express();
 app.use(express.json());
@@ -53,10 +53,14 @@ app.post('/api/ask', async (req, res) => {
   if (!question) return res.status(400).json({ error: 'Empty question' });
   try {
     const prep = await prepare(question, history);
-    const raw = await chat(prep.messages, { temperature: 0.3, jsonMode: false, maxTokens: 1600 });
-    const parsed = parseSections(raw);
-    await logQuery({ question, type: parsed.type, industry: prep.industryTag, confidence: parsed.confidence, sources: parsed.sources, user });
-    res.json({ grounded: parsed.grounded, opinion: parsed.opinion, confidence: parsed.confidence, sources: parsed.sources, industry: prep.industryTag, type: parsed.type });
+    const [sayRaw, readRaw] = await Promise.all([
+      chat(prep.sayMessages, { temperature: 0.5, jsonMode: false, maxTokens: 900 }),
+      chat(prep.readMessages, { temperature: 0.5, jsonMode: false, maxTokens: 900 }),
+    ]);
+    const grounded = cleanSay(sayRaw);
+    const read = parseRead(readRaw);
+    await logQuery({ question, type: read.type, industry: prep.industryTag, confidence: read.confidence, sources: read.sources, user });
+    res.json({ grounded, opinion: read.opinion, confidence: read.confidence, sources: read.sources, industry: prep.industryTag, type: read.type });
   } catch (e) {
     console.error('ask error:', e);
     res.status(500).json({ error: 'Copilot failed: ' + (e.message || 'unknown') });
