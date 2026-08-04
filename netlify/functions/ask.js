@@ -1,6 +1,6 @@
 // netlify/functions/ask.js — BD Copilot endpoint (non-streaming, reliable CJS style).
 // Uses the delimited output format (fixes the raw-JSON render bug) and logs each query.
-const { prepare, cleanSay, parseRead, logQuery } = require('../lib/copilot');
+const { prepare, parseSections, logQuery } = require('../lib/copilot');
 const { chat } = require('../lib/llm');
 
 function validate(event) {
@@ -24,21 +24,16 @@ exports.handler = async (event) => {
 
   try {
     const prep = await prepare(question, history);
-    // Two parallel calls: SAY sees client-safe context only (can't leak); READ sees everything.
-    const [sayRaw, readRaw] = await Promise.all([
-      chat(prep.sayMessages, { temperature: 0.5, jsonMode: false, maxTokens: 900 }),
-      chat(prep.readMessages, { temperature: 0.5, jsonMode: false, maxTokens: 900 }),
-    ]);
-    const grounded = cleanSay(sayRaw);
-    const read = parseRead(readRaw);
-    await logQuery({ question, type: read.type, industry: prep.industryTag, confidence: read.confidence, sources: read.sources, user });
+    const raw = await chat(prep.messages, { temperature: 0.5, jsonMode: false, maxTokens: 2048 });
+    const parsed = parseSections(raw);
+    await logQuery({ question, type: parsed.type, industry: prep.industryTag, confidence: parsed.confidence, sources: parsed.sources, user });
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        grounded, opinion: read.opinion,
-        confidence: read.confidence, sources: read.sources,
-        industry: prep.industryTag, type: read.type,
+        grounded: parsed.grounded, opinion: parsed.opinion,
+        confidence: parsed.confidence, sources: parsed.sources,
+        industry: prep.industryTag, type: parsed.type,
       }),
     };
   } catch (e) {
