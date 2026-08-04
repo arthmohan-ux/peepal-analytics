@@ -329,6 +329,10 @@ function deriveScope(userText, pack) {
     ['retail', 'fmcg'], ['fmcg', 'fmcg'], ['consumer', 'fmcg'],
     ['media', 'media'], ['entertainment', 'media'],
     ['consulting', 'consulting'], ['advisory', 'consulting'],
+    // unlisted / emerging spaces → their parent/adjacent industries in our data
+    ['solar', 'manufactur'], ['renewable', 'manufactur'], ['cleantech', 'manufactur'], ['clean energy', 'manufactur'],
+    ['energy', 'manufactur'], ['battery', 'manufactur'], ['ev', 'manufactur'], ['electric vehicle', 'manufactur'],
+    ['automotive', 'manufactur'], ['auto', 'manufactur'], ['industrial', 'manufactur'], ['electronics', 'it'], ['hardware', 'it'],
   ];
   for (const [kw, indSub] of INDUSTRY_SYNONYMS) {
     if (!new RegExp('\\b' + kw + '\\b', 'i').test(lowerText)) continue;
