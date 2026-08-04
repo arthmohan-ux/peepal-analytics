@@ -317,7 +317,26 @@ function deriveScope(userText, pack) {
     const re = phraseRegex(I.name);
     if (re && re.test(lowerText)) matchedIndustries.add(I.name);
   }
-  const namedIndustries = [...matchedIndustries]; // industries explicitly named in the query (for the tag)
+  // synonym map: common words that mean an industry but don't match its exact name
+  // (keyword -> substring of the industry's normalized name)
+  const INDUSTRY_SYNONYMS = [
+    ['tech', 'it'], ['technology', 'it'], ['software', 'it'], ['saas', 'it'],
+    ['banking', 'bfsi'], ['bank', 'bfsi'], ['finance', 'bfsi'], ['financial', 'bfsi'], ['fintech', 'bfsi'], ['insurance', 'bfsi'],
+    ['airline', 'aviation'], ['airlines', 'aviation'], ['aerospace', 'aviation'],
+    ['telecom', 'telecom'], ['telco', 'telecom'],
+    ['pharma', 'pharma'], ['pharmaceutical', 'pharma'], ['healthcare', 'pharma'],
+    ['manufacturing', 'manufactur'], ['engineering', 'manufactur'],
+    ['retail', 'fmcg'], ['fmcg', 'fmcg'], ['consumer', 'fmcg'],
+    ['media', 'media'], ['entertainment', 'media'],
+    ['consulting', 'consulting'], ['advisory', 'consulting'],
+  ];
+  for (const [kw, indSub] of INDUSTRY_SYNONYMS) {
+    if (!new RegExp('\\b' + kw + '\\b', 'i').test(lowerText)) continue;
+    for (const I of Object.values(pack.industries)) {
+      if (I.name && !JUNK_INDUSTRIES.has(I.name.toLowerCase().trim()) && norm(I.name).includes(indSub)) matchedIndustries.add(I.name);
+    }
+  }
+  const namedIndustries = [...matchedIndustries]; // industries explicitly named/implied in the query (for the tag)
   matchedCompanies.forEach((c) => { if (c.industry) matchedIndustries.add(c.industry); });
   // adjacency widen
   const widened = new Set(matchedIndustries);

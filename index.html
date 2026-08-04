@@ -1583,8 +1583,9 @@ let cpBusy = false;
 function mdLite(s) {
   // minimal, safe markdown: escape, then **bold**, bullet lists, line breaks
   let html = String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
+  html = html.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>'); // bold: balanced, can't cross other *
+  html = html.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');           // italic: balanced single
+  html = html.replace(/\*+/g, '');                                 // drop any stray/unbalanced asterisks
   const lines = html.split('\n');
   let out = '', inList = false;
   lines.forEach(line => {
