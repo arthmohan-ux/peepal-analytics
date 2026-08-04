@@ -13,10 +13,12 @@
 
 const API_KEY = process.env.LLM_API_KEY || process.env.MOONSHOT_API_KEY;
 const BASE_URL = (process.env.LLM_BASE_URL || process.env.MOONSHOT_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/$/, '');
-const PRIMARY_MODEL = process.env.LLM_MODEL || process.env.MOONSHOT_MODEL || 'gemini-3.5-flash';
+// Default to Flash-Lite: it barely "thinks", so it returns in a few seconds and stays
+// under Netlify's function timeout. The heavy thinking models (plain Flash) time out.
+const PRIMARY_MODEL = process.env.LLM_MODEL || process.env.MOONSHOT_MODEL || 'gemini-3.5-flash-lite';
 
 const IS_GEMINI = /googleapis\.com/i.test(BASE_URL);
-const GEMINI_FALLBACKS = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-2.0-flash'];
+const GEMINI_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash'];
 
 const MODEL = PRIMARY_MODEL; // exported for debug display
 
