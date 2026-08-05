@@ -302,23 +302,28 @@ function skillSearch(term, pack) {
 
 // ── scope + context assembly ──────────────────────────────────────────────────
 // Derive which companies / industries the conversation is about, from ALL user text.
+// Company names that are also everyday BD verbs/words — skip auto-matching them as clients
+// (e.g. "who should I target" must not match the retailer "Target").
+const COMPANY_MATCH_SKIP = new Set(['target', 'meeting', 'call', 'help', 'lead', 'scale', 'pilot']);
+
 function deriveScope(userText, pack) {
   const lowerText = ' ' + toWords(userText) + ' ';
   const matchedCompanies = [];
   for (const c of Object.values(pack.companies)) {
+    if (COMPANY_MATCH_SKIP.has(norm(c.name))) continue;
     const re = phraseRegex(c.name);
     if (re && re.test(lowerText)) matchedCompanies.push(c);
   }
   // industries: word-boundary match on the industry name (skip junk/placeholder values)
   const JUNK_INDUSTRIES = new Set(['unknown', 'check', 'test', 'tbd', 'na', 'n/a', '-', '']);
-  const matchedIndustries = new Set();
+  // DIRECT: the industry name literally appears in the query.
+  const directIndustries = new Set();
   for (const I of Object.values(pack.industries)) {
     if (!I.name || JUNK_INDUSTRIES.has(I.name.toLowerCase().trim())) continue;
     const re = phraseRegex(I.name);
-    if (re && re.test(lowerText)) matchedIndustries.add(I.name);
+    if (re && re.test(lowerText)) directIndustries.add(I.name);
   }
-  // synonym map: common words that mean an industry but don't match its exact name
-  // (keyword -> substring of the industry's normalized name)
+  // ADJACENT: a sub-vertical word (fintech, solar) maps to a PARENT/related industry we track.
   const INDUSTRY_SYNONYMS = [
     ['tech', 'it'], ['technology', 'it'], ['software', 'it'], ['saas', 'it'],
     ['banking', 'bfsi'], ['bank', 'bfsi'], ['finance', 'bfsi'], ['financial', 'bfsi'], ['fintech', 'bfsi'], ['insurance', 'bfsi'],
@@ -329,19 +334,29 @@ function deriveScope(userText, pack) {
     ['retail', 'fmcg'], ['fmcg', 'fmcg'], ['consumer', 'fmcg'],
     ['media', 'media'], ['entertainment', 'media'],
     ['consulting', 'consulting'], ['advisory', 'consulting'],
-    // unlisted / emerging spaces → their parent/adjacent industries in our data
     ['solar', 'manufactur'], ['renewable', 'manufactur'], ['cleantech', 'manufactur'], ['clean energy', 'manufactur'],
     ['energy', 'manufactur'], ['battery', 'manufactur'], ['ev', 'manufactur'], ['electric vehicle', 'manufactur'],
     ['automotive', 'manufactur'], ['auto', 'manufactur'], ['industrial', 'manufactur'], ['electronics', 'it'], ['hardware', 'it'],
+    ['semiconductor', 'manufactur'], ['semiconductors', 'manufactur'], ['chip', 'manufactur'], ['chips', 'manufactur'], ['medtech', 'manufactur'], ['medical device', 'manufactur'],
   ];
+  const adjacentIndustries = new Set();
+  const adjacencyNotes = []; // { term, industries } — the query mentioned a space we don't directly track
   for (const [kw, indSub] of INDUSTRY_SYNONYMS) {
     if (!new RegExp('\\b' + kw + '\\b', 'i').test(lowerText)) continue;
+    const hit = [];
     for (const I of Object.values(pack.industries)) {
-      if (I.name && !JUNK_INDUSTRIES.has(I.name.toLowerCase().trim()) && norm(I.name).includes(indSub)) matchedIndustries.add(I.name);
+      if (I.name && !JUNK_INDUSTRIES.has(I.name.toLowerCase().trim()) && norm(I.name).includes(indSub) && !directIndustries.has(I.name)) {
+        adjacentIndustries.add(I.name); if (!hit.includes(I.name)) hit.push(I.name);
+      }
     }
+    // only note as adjacency if the query term isn't itself a direct industry name
+    if (hit.length && !directIndustries.has(kw)) adjacencyNotes.push({ term: kw, industries: hit });
   }
-  const namedIndustries = [...matchedIndustries]; // industries explicitly named/implied in the query (for the tag)
-  matchedCompanies.forEach((c) => { if (c.industry) matchedIndustries.add(c.industry); });
+  // a matched company is DIRECT evidence; its whole industry is only adjacent context
+  matchedCompanies.forEach((c) => { if (c.industry && !directIndustries.has(c.industry)) adjacentIndustries.add(c.industry); });
+
+  const matchedIndustries = new Set([...directIndustries, ...adjacentIndustries]);
+  const namedIndustries = [...directIndustries]; // for the tag: only truly-named industries
   // adjacency widen
   const widened = new Set(matchedIndustries);
   matchedIndustries.forEach((ind) => adjacentTo(norm(ind)).forEach((a) => {
@@ -353,11 +368,21 @@ function deriveScope(userText, pack) {
 
   // skill / role / skill-stack matches (e.g. "java", "guidewire", "sap", "cyber")
   const compNorm = norm(comps.map((c) => c.name).join(' '));
+  // compound/synonym expansion so one-word queries hit the multi-word skill index
+  const SKILL_SYN = {
+    cybersecurity: ['security', 'cyber'], infosec: ['security', 'cyber'], cyber: ['security'],
+    fullstack: ['full stack'], devops: ['devops'], mlops: ['mlops'], genai: ['gen ai', 'genai'],
+    ml: ['machine learning'], ai: ['ai', 'genai'], qa: ['quality', 'test'], sdet: ['sdet', 'test'],
+    frontend: ['front end'], backend: ['back end'], dataengineering: ['data engineer'],
+  };
+  const skillTokens = new Set(tokenize(userText));
+  for (const t of [...skillTokens]) if (SKILL_SYN[t]) SKILL_SYN[t].forEach((s) => skillTokens.add(s));
   const skills = [];
-  for (const tok of tokenize(userText)) {
-    if (compNorm.includes(tok)) continue; // already covered by a company match
+  const seenTerms = new Set();
+  for (const tok of skillTokens) {
+    if (compNorm.includes(tok) || seenTerms.has(tok)) continue; // already covered
     const s = skillSearch(tok, pack);
-    if (s.total >= 2) skills.push(s);
+    if (s.total >= 2) { skills.push(s); seenTerms.add(tok); }
   }
   skills.sort((a, b) => b.total - a.total);
 
@@ -390,7 +415,7 @@ function deriveScope(userText, pack) {
     if (re.test(lowerText)) locations.push(loc);
   }
 
-  return { companies: comps, industries: [...matchedIndustries], namedIndustries, widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations };
+  return { companies: comps, industries: [...matchedIndustries], directIndustries: [...directIndustries], adjacentIndustries: [...adjacentIndustries], adjacencyNotes, namedIndustries, widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations };
 }
 
 function companyBlock(c) {
@@ -439,6 +464,21 @@ function assembleContext(userText, pack) {
   const fyAll = Object.keys(pack.byFY || {}).sort();
   if (fyAll.length) {
     parts.push('## BY FINANCIAL YEAR (exact, all years)\n' + fyAll.map((fy) => { const F = pack.byFY[fy]; return `${fy}: ${F.joinees} joinees, ${F.drops} drops, ${fmtRs(F.revenue)}`; }).join('\n'));
+  }
+
+  // EVIDENCE DIRECTNESS — tells the model what's DIRECT vs ADJACENT vs ABSENT for this query
+  {
+    const direct = [];
+    if (scope.companies && scope.companies.length) direct.push('named client(s): ' + scope.companies.map((c) => c.name).join(', '));
+    if (scope.directIndustries && scope.directIndustries.length) direct.push('industry named directly: ' + scope.directIndustries.join(', '));
+    const roleEv = (scope.skills || []).map((s) => `${s.term} (${s.total})`);
+    const adjLines = (scope.adjacencyNotes || []).map((n) => `"${n.term}" is NOT a space we directly track — the closest is ${n.industries.join('/')} (parent/adjacent). Treat any ${n.industries.join('/')} evidence as ADJACENT to "${n.term}", never as direct ${n.term} proof.`);
+    const bits = [];
+    if (direct.length) bits.push('DIRECT evidence present: ' + direct.join('; ') + '.');
+    if (roleEv.length) bits.push('ROLE/SKILL evidence: ' + roleEv.join(', ') + ' — these are role-level counts across ALL industries, NOT proof of any specific industry.');
+    if (adjLines.length) bits.push('ADJACENT: ' + adjLines.join(' '));
+    if (!direct.length && !roleEv.length && !adjLines.length) bits.push('Nothing specific matched this query — you likely have NO direct evidence. Say so honestly rather than stretching unrelated data.');
+    parts.push('## EVIDENCE DIRECTNESS (read FIRST — classify before you claim; never present adjacent/role evidence as direct)\n' + bits.join('\n'));
   }
 
   // 2) Scoped companies (exact numbers)
@@ -527,12 +567,19 @@ function assembleContext(userText, pack) {
   const src = pack.kb.sources || [];
   parts.push('## STORY INDEX (pick the story whose PROBLEM mirrors the prospect)\n' + src.map((s) => `${s.source_id} [${s.type}] ${s.client || s.industry || 'general'}: ${s.bd_usage}`).join('\n'));
   const scopedClientsNorm = new Set(scope.companies.map((c) => norm(c.name)));
+  // pull a story if the query keywords match its "when to use" / tags / problem (e.g. "GCC" -> Xylem)
+  const qToks = tokenize(userText);
+  const storyKwHit = (s) => {
+    const hay = ((s.bd_usage || '') + ' ' + (s.tags || '') + ' ' + (s.problem || '')).toLowerCase();
+    return qToks.some((t) => t.length >= 3 && hay.includes(t));
+  };
   const fullSources = src.filter((s) => {
     if (s.client && scopedClientsNorm.has(norm(s.client))) return true;
     if (s.industry && matchIndustryLoose(s.industry, scope.widenedIndustries)) return true;
-    if (!s.client && !s.industry) return adviceIntent; // general methods only for advice questions
+    if (storyKwHit(s)) return true; // story whose usage/problem matches the query
+    if (!s.client && !s.industry) return adviceIntent; // general methods for advice questions
     return false;
-  });
+  }).slice(0, 8); // cap to keep the prompt bounded
   if (fullSources.length) {
     // client-safe half of each story (problem, intervention, client-safe result, when to use)
     parts.push('## RELEVANT STORIES (full)\n' + fullSources.map((s) =>
@@ -551,7 +598,7 @@ function assembleContext(userText, pack) {
 
   // 6) Doctrine — core definitions always; the rest (ICP/PEEPAL Way/commercials/targeting) only for advice questions
   const doc = pack.kb.doctrine || [];
-  const coreCats = new Set(['definition', 'service_term', 'service_line']);
+  const coreCats = new Set(['definition', 'service_term', 'service_line', 'positioning']);
   const adviceCats = new Set(['icp_firmographic', 'excluded_industry', 'sweet_spot', 'service_fit', 'peepal_way', 'company', 'commercials']);
   const wantsCommercials = /\b(commercial|commercials|fee|fees|pricing|price|rate|rates|commission|charge|charges|cost|margin|discount|percentage)\b/i.test(userText);
   const docBase = doc.filter((d) => coreCats.has(d.category) || (adviceIntent && adviceCats.has(d.category)) || (wantsCommercials && (d.category === 'commercials' || d.category === 'service_line')));
