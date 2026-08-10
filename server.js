@@ -1,6 +1,5 @@
 const express = require('express');
 const path = require('path');
-const { google } = require('googleapis');
 const { chat } = require('./netlify/lib/llm');
 const { prepare, parseSections, logQuery, saveFeedback, recentQueries } = require('./netlify/lib/copilot');
 
@@ -17,22 +16,8 @@ function validateBasicAuth(req) {
   return username === process.env.SITE_USERNAME && password === process.env.SITE_PASSWORD;
 }
 
-// ── SHEETS HELPER ──
-async function getSheetData(sheetName) {
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
-  const auth = new google.auth.JWT({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: privateKey,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-  });
-  await auth.authorize();
-  const sheets = google.sheets({ version: 'v4', auth });
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: process.env.SHEET_ID,
-    range: `'${sheetName}'`,
-  });
-  return res.data.values || [];
-}
+// ── SHEETS HELPER (use shared module) ──
+const { getSheetData } = require('./netlify/lib/sheets');
 
 // ── POST /api/auth ──
 app.post('/api/auth', (req, res) => {
