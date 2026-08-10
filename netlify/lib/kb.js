@@ -40,6 +40,16 @@ function seniorityTier(desig) {
   return 'Mid/Other';
 }
 
+// YOE-based experience bands (more reliable than designation heuristic)
+const EXP_BAND_ORDER = ['Junior (0-4 yrs)', 'Mid (4-8 yrs)', 'Senior (8-12 yrs)', 'Very Senior (12-15 yrs)', 'Leadership (15+ yrs)'];
+function expBand(yoe) {
+  if (yoe < 4) return 'Junior (0-4 yrs)';
+  if (yoe < 8) return 'Mid (4-8 yrs)';
+  if (yoe < 12) return 'Senior (8-12 yrs)';
+  if (yoe < 15) return 'Very Senior (12-15 yrs)';
+  return 'Leadership (15+ yrs)';
+}
+
 // Industry adjacency — used to widen insight scope to neighbouring sectors.
 // Keys/values are matched loosely (normalized substring), so both sheet-short
 // ('BFSI','Telecom','IT Prod') and display names work.
@@ -87,7 +97,7 @@ async function buildPack() {
         name: String(name).trim(), industry: '', hq: '',
         joinees: 0, drops: 0, revenue: 0,
         byDesig: {}, byRole: {}, bySeniority: {}, skillIndex: {},
-        exp: { sum: 0, count: 0, min: null, max: null }, expByCombo: {},
+        exp: { sum: 0, count: 0, min: null, max: null }, expByCombo: {}, byExpBand: {}, bandByCombo: {},
         byLocation: {}, byPrev: {},
         firstJoin: null, lastJoin: null,
       };
@@ -119,11 +129,15 @@ async function buildPack() {
       c.exp.sum += yoe; c.exp.count += 1;
       c.exp.min = c.exp.min === null ? yoe : Math.min(c.exp.min, yoe);
       c.exp.max = c.exp.max === null ? yoe : Math.max(c.exp.max, yoe);
+      const band = expBand(yoe);
+      c.byExpBand[band] = (c.byExpBand[band] || 0) + 1;
       if (combo) {
         const e = (c.expByCombo[combo] = c.expByCombo[combo] || { sum: 0, count: 0, min: null, max: null });
         e.sum += yoe; e.count += 1;
         e.min = e.min === null ? yoe : Math.min(e.min, yoe);
         e.max = e.max === null ? yoe : Math.max(e.max, yoe);
+        c.bandByCombo[combo] = c.bandByCombo[combo] || {};
+        c.bandByCombo[combo][band] = (c.bandByCombo[combo][band] || 0) + 1;
       }
     }
     const loc = r[14] ? String(r[14]).trim() : '';
@@ -161,10 +175,11 @@ async function buildPack() {
   const industries = {}; // display value -> rollup
   Object.values(companies).forEach((c) => {
     const ind = c.industry || 'Unknown';
-    if (!industries[ind]) industries[ind] = { name: ind, companies: 0, joinees: 0, drops: 0, revenue: 0, bySeniority: {}, topCompanies: [] };
+    if (!industries[ind]) industries[ind] = { name: ind, companies: 0, joinees: 0, drops: 0, revenue: 0, bySeniority: {}, byExpBand: {}, topCompanies: [] };
     const I = industries[ind];
     I.companies += 1; I.joinees += c.joinees; I.drops += c.drops; I.revenue += c.revenue;
     for (const [t, n] of Object.entries(c.bySeniority)) I.bySeniority[t] = (I.bySeniority[t] || 0) + n;
+    for (const [b, n] of Object.entries(c.byExpBand)) I.byExpBand[b] = (I.byExpBand[b] || 0) + n;
   });
   Object.values(industries).forEach((I) => {
     I.topCompanies = Object.values(companies)
@@ -284,7 +299,7 @@ function tokenize(t) {
 }
 function skillSearch(term, pack) {
   const re = new RegExp('\\b' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
-  let total = 0; const perCo = {}; const byInd = {};
+  let total = 0; const perCo = {}; const byInd = {}; const bands = {};
   let expSum = 0, expCount = 0, expMin = null, expMax = null;
   for (const c of Object.values(pack.companies)) {
     let n = 0;
@@ -293,11 +308,12 @@ function skillSearch(term, pack) {
       n += cnt;
       const e = c.expByCombo[combo];
       if (e && e.count) { expSum += e.sum; expCount += e.count; expMin = expMin === null ? e.min : Math.min(expMin, e.min); expMax = expMax === null ? e.max : Math.max(expMax, e.max); }
+      if (c.bandByCombo && c.bandByCombo[combo]) { for (const [b, bn] of Object.entries(c.bandByCombo[combo])) bands[b] = (bands[b] || 0) + bn; }
     }
     if (n > 0) { perCo[c.name] = n; total += n; const ind = c.industry || 'Unknown'; byInd[ind] = (byInd[ind] || 0) + n; }
   }
   const yoe = expCount ? { avg: (expSum / expCount).toFixed(1), min: expMin, max: expMax, n: expCount } : null;
-  return { term, total, top: Object.entries(perCo).sort((a, b) => b[1] - a[1]).slice(0, 15), byInd, yoe };
+  return { term, total, top: Object.entries(perCo).sort((a, b) => b[1] - a[1]).slice(0, 15), byInd, yoe, bands };
 }
 
 // ── scope + context assembly ──────────────────────────────────────────────────
@@ -415,7 +431,20 @@ function deriveScope(userText, pack) {
     if (re.test(lowerText)) locations.push(loc);
   }
 
-  return { companies: comps, industries: [...matchedIndustries], directIndustries: [...directIndustries], adjacentIndustries: [...adjacentIndustries], adjacencyNotes, namedIndustries, widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations };
+  // Seniority / experience level detection (synonyms for each tier)
+  const SENIORITY_KW = [
+    [/\b(junior|entry.?level|fresher|early.?career)\b/i, 'junior'],
+    [/\b(mid.?level|mid.?career|intermediate)\b/i, 'mid'],
+    [/\bvery.?senior\b/i, 'very_senior'],
+    [/\b(senior)\b/i, 'senior'],
+    [/\b(leadership|executive|c.?suite|director.?level|vp.?level)\b/i, 'leadership'],
+  ];
+  let seniorityFilter = null;
+  for (const [re, level] of SENIORITY_KW) {
+    if (re.test(userText)) { seniorityFilter = level; break; }
+  }
+
+  return { companies: comps, industries: [...matchedIndustries], directIndustries: [...directIndustries], adjacentIndustries: [...adjacentIndustries], adjacencyNotes, namedIndustries, widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations, seniorityFilter };
 }
 
 function companyBlock(c) {
@@ -428,8 +457,12 @@ function companyBlock(c) {
   if (desigs.length) lines.push('Top designations (exact counts): ' + desigs.map(([d, n]) => `${d} (${n})`).join('; '));
   const roles = topEntries(c.byRole, 8);
   if (roles.length) lines.push('Top functions/roles (exact counts): ' + roles.map(([d, n]) => `${d} (${n})`).join('; '));
-  const sen = topEntries(c.bySeniority, 6);
-  if (sen.length) lines.push('By seniority (heuristic, approximate): ' + sen.map(([d, n]) => `${d} (${n})`).join('; '));
+  const expBands = EXP_BAND_ORDER.map(b => [b, c.byExpBand[b] || 0]).filter(([, n]) => n > 0);
+  if (expBands.length) {
+    lines.push('By experience band: ' + expBands.map(([b, n]) => `${b}: ${n}`).join('; '));
+    const seniorPlus = (c.byExpBand['Senior (8-12 yrs)'] || 0) + (c.byExpBand['Very Senior (12-15 yrs)'] || 0) + (c.byExpBand['Leadership (15+ yrs)'] || 0);
+    if (seniorPlus > 0) lines.push(`Senior+ (8+ yrs experience): ${seniorPlus} joinees`);
+  }
   if (c.exp && c.exp.count) lines.push(`Years of experience closed: avg ${(c.exp.sum / c.exp.count).toFixed(1)} yrs, range ${c.exp.min}-${c.exp.max} yrs (across ${c.exp.count} with data)`);
   const locs = topEntries(c.byLocation, 6);
   if (locs.length) lines.push('Joining locations (where they joined): ' + locs.map(([l, n]) => `${l} (${n})`).join('; '));
@@ -442,8 +475,12 @@ function industryBlock(I) {
   const lines = [];
   lines.push(`### Industry: ${I.name}`);
   lines.push(`Companies: ${I.companies} | Joinees: ${I.joinees} | Drops: ${I.drops} | Revenue: ${fmtRs(I.revenue)}`);
-  const sen = topEntries(I.bySeniority, 6);
-  if (sen.length) lines.push('By seniority (heuristic): ' + sen.map(([d, n]) => `${d} (${n})`).join('; '));
+  const expBands = EXP_BAND_ORDER.map(b => [b, I.byExpBand[b] || 0]).filter(([, n]) => n > 0);
+  if (expBands.length) {
+    lines.push('By experience band: ' + expBands.map(([b, n]) => `${b}: ${n}`).join('; '));
+    const seniorPlus = (I.byExpBand['Senior (8-12 yrs)'] || 0) + (I.byExpBand['Very Senior (12-15 yrs)'] || 0) + (I.byExpBand['Leadership (15+ yrs)'] || 0);
+    if (seniorPlus > 0) lines.push(`Senior+ (8+ yrs experience): ${seniorPlus} joinees`);
+  }
   if (I.topCompanies.length) lines.push('Top companies (by closures): ' + I.topCompanies.slice(0, 15).map((c) => `${c.name} (${c.joinees} joinees, ${fmtRs(c.revenue)})`).join('; '));
   return lines.join('\n');
 }
@@ -478,6 +515,13 @@ function assembleContext(userText, pack) {
     if (roleEv.length) bits.push('ROLE/SKILL evidence: ' + roleEv.join(', ') + ' — these are role-level counts across ALL industries, NOT proof of any specific industry.');
     if (adjLines.length) bits.push('ADJACENT: ' + adjLines.join(' '));
     if (!direct.length && !roleEv.length && !adjLines.length) bits.push('Nothing specific matched this query — you likely have NO direct evidence. Say so honestly rather than stretching unrelated data.');
+    if (scope.seniorityFilter) {
+      const tierLabel = { junior: 'Junior (0-4 yrs)', mid: 'Mid (4-8 yrs)', senior: 'Senior (8-12 yrs)', very_senior: 'Very Senior (12-15 yrs)', leadership: 'Leadership (15+ yrs)' };
+      const senNote = scope.seniorityFilter === 'senior' ? 'Use the "Senior+ (8+ yrs)" pre-computed totals and the Senior/Very Senior/Leadership band counts below.' :
+        scope.seniorityFilter === 'very_senior' ? 'Use the Very Senior (12-15 yrs) and Leadership (15+ yrs) band counts below.' :
+        `Use the "${tierLabel[scope.seniorityFilter]}" band counts below.`;
+      bits.push(`SENIORITY: The query asks about ${tierLabel[scope.seniorityFilter]}-level placements. Experience bands: Junior 0-4 yrs, Mid 4-8 yrs, Senior 8-12 yrs, Very Senior 12-15 yrs, Leadership 15+ yrs. ${senNote}`);
+    }
     parts.push('## EVIDENCE DIRECTNESS (read FIRST — classify before you claim; never present adjacent/role evidence as direct)\n' + bits.join('\n'));
   }
 
@@ -497,7 +541,10 @@ function assembleContext(userText, pack) {
       const top = s.top.map(([name, n]) => `${name} (${n})`).join('; ');
       const inds = Object.entries(s.byInd).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([i, n]) => `${i} (${n})`).join('; ');
       const yoeLine = s.yoe ? `\nYears of experience: avg ${s.yoe.avg} yrs, range ${s.yoe.min}-${s.yoe.max} yrs (across ${s.yoe.n} with data)` : '';
-      return `### "${s.term}" — ${s.total} closures (joinees whose designation/function mentions "${s.term}")\nTop companies: ${top}\nBy industry: ${inds}${yoeLine}`;
+      const bandLine = s.bands && Object.keys(s.bands).length ? '\nBy experience band: ' + EXP_BAND_ORDER.map(b => [b, s.bands[b] || 0]).filter(([, n]) => n > 0).map(([b, n]) => `${b}: ${n}`).join('; ') : '';
+      const senPlus = s.bands ? (s.bands['Senior (8-12 yrs)'] || 0) + (s.bands['Very Senior (12-15 yrs)'] || 0) + (s.bands['Leadership (15+ yrs)'] || 0) : 0;
+      const senPlusLine = senPlus > 0 ? `\nSenior+ (8+ yrs): ${senPlus}` : '';
+      return `### "${s.term}" — ${s.total} closures (joinees whose designation/function mentions "${s.term}")\nTop companies: ${top}\nBy industry: ${inds}${yoeLine}${bandLine}${senPlusLine}`;
     });
     parts.push('## SKILL / ROLE MATCHES (exact - searched across all joinee designations & functions)\n' + blocks.join('\n\n'));
   }
