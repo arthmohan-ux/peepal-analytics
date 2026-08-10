@@ -1,6 +1,18 @@
 const { google } = require('googleapis');
+const fs = require('fs');
+const path = require('path');
 
 function jwt(scope) {
+  // Try secret file first (Render), fall back to env vars (Netlify/local)
+  const secretPath = '/etc/secrets/service-account.json';
+  if (fs.existsSync(secretPath)) {
+    const creds = JSON.parse(fs.readFileSync(secretPath, 'utf8'));
+    return new google.auth.JWT({
+      email: creds.client_email,
+      key: creds.private_key,
+      scopes: [scope],
+    });
+  }
   const privateKey = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
   return new google.auth.JWT({
     email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
