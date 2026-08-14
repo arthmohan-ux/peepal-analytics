@@ -30,6 +30,34 @@ function safeDate(v) {
   return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
 }
 
+// Indian financial-year quarter from a join date: Apr-Jun Q1, Jul-Sep Q2, Oct-Dec Q3, Jan-Mar Q4.
+// Matches the dashboard's fyQuarter() in server.js so both surfaces agree.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Calendar-month key 'YYYY-MM' from a join date, plus a human label 'Mar 2025'.
+function monthKeyOf(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
+}
+function monthLabel(key) {
+  const [y, m] = String(key).split('-');
+  const i = parseInt(m, 10) - 1;
+  return (MONTH_ABBR[i] || m) + ' ' + y;
+}
+
+const QUARTER_ORDER = ['Q1 (Apr-Jun)', 'Q2 (Jul-Sep)', 'Q3 (Oct-Dec)', 'Q4 (Jan-Mar)'];
+function fyQuarterOf(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  const m = d.getMonth() + 1;
+  if (m >= 4 && m <= 6) return 'Q1 (Apr-Jun)';
+  if (m >= 7 && m <= 9) return 'Q2 (Jul-Sep)';
+  if (m >= 10 && m <= 12) return 'Q3 (Oct-Dec)';
+  return 'Q4 (Jan-Mar)';
+}
+
 // Heuristic seniority tier from a designation string. Conservative; flagged as heuristic downstream.
 function seniorityTier(desig) {
   const d = String(desig || '').toLowerCase();
@@ -98,7 +126,7 @@ async function buildPack() {
         joinees: 0, drops: 0, revenue: 0,
         byDesig: {}, byRole: {}, bySeniority: {}, skillIndex: {},
         exp: { sum: 0, count: 0, min: null, max: null }, expByCombo: {}, byExpBand: {}, bandByCombo: {},
-        byLocation: {}, byPrev: {},
+        byLocation: {}, byPrev: {}, byQuarter: {}, byMonth: {},
         firstJoin: null, lastJoin: null,
       };
     }
@@ -106,7 +134,15 @@ async function buildPack() {
   }
 
   const byFY = {}; // financial-year rollup: fy -> {joinees, drops, revenue}
+  const byQuarter = {}; // firm-wide seasonality: quarter -> {joinees, drops, revenue} (all years combined)
+  const byFYQ = {};     // granular: "FY Qn" -> {joinees, drops, revenue}
+  const byMonth = {};   // firm-wide calendar month: 'YYYY-MM' -> {joinees, drops, revenue}
   const isFY = (v) => /^\d{4}-\d{4}$/.test(String(v || '').trim());
+  const bumpQ = (bucket, key, field, amt) => {
+    if (!key) return;
+    (bucket[key] = bucket[key] || { joinees: 0, drops: 0, revenue: 0 });
+    bucket[key][field] += (amt === undefined ? 1 : amt);
+  };
 
   joineeRows.slice(1).forEach((r) => {
     if (!r || !r[0] || !r[6]) return;
@@ -114,6 +150,18 @@ async function buildPack() {
     c.joinees += 1;
     c.revenue += safeFloat(r[9]);
     if (isFY(r[4])) { const fy = String(r[4]).trim(); (byFY[fy] = byFY[fy] || { joinees: 0, drops: 0, revenue: 0 }); byFY[fy].joinees++; byFY[fy].revenue += safeFloat(r[9]); }
+    // seasonality: quarter of the join date (company-level, firm-wide, and FY-granular)
+    const q = fyQuarterOf(r[0]);
+    if (q) {
+      c.byQuarter[q] = (c.byQuarter[q] || 0) + 1;
+      bumpQ(byQuarter, q, 'joinees'); bumpQ(byQuarter, q, 'revenue', safeFloat(r[9]));
+      if (isFY(r[4])) { const k = String(r[4]).trim() + ' ' + q.split(' ')[0]; bumpQ(byFYQ, k, 'joinees'); bumpQ(byFYQ, k, 'revenue', safeFloat(r[9])); }
+    }
+    const mk = monthKeyOf(r[0]);
+    if (mk) {
+      c.byMonth[mk] = (c.byMonth[mk] || 0) + 1;
+      bumpQ(byMonth, mk, 'joinees'); bumpQ(byMonth, mk, 'revenue', safeFloat(r[9]));
+    }
     if (!c.industry && r[8]) c.industry = String(r[8]).trim();
     if (!c.hq && r[7]) c.hq = String(r[7]).trim();
     const desig = r[11] ? String(r[11]).trim() : '';
@@ -155,6 +203,13 @@ async function buildPack() {
     if (!c.industry && r[9]) c.industry = String(r[9]).trim();
     if (!c.hq && r[7]) c.hq = String(r[7]).trim();
     if (isFY(r[4])) { const fy = String(r[4]).trim(); (byFY[fy] = byFY[fy] || { joinees: 0, drops: 0, revenue: 0 }); byFY[fy].drops++; }
+    const dq = fyQuarterOf(r[0]);
+    if (dq) {
+      bumpQ(byQuarter, dq, 'drops');
+      if (isFY(r[4])) bumpQ(byFYQ, String(r[4]).trim() + ' ' + dq.split(' ')[0], 'drops');
+    }
+    const dmk = monthKeyOf(r[0]);
+    if (dmk) bumpQ(byMonth, dmk, 'drops');
   });
 
   // --- engagement (model + dates) ---
@@ -175,11 +230,13 @@ async function buildPack() {
   const industries = {}; // display value -> rollup
   Object.values(companies).forEach((c) => {
     const ind = c.industry || 'Unknown';
-    if (!industries[ind]) industries[ind] = { name: ind, companies: 0, joinees: 0, drops: 0, revenue: 0, bySeniority: {}, byExpBand: {}, topCompanies: [] };
+    if (!industries[ind]) industries[ind] = { name: ind, companies: 0, joinees: 0, drops: 0, revenue: 0, bySeniority: {}, byExpBand: {}, byQuarter: {}, byMonth: {}, topCompanies: [] };
     const I = industries[ind];
     I.companies += 1; I.joinees += c.joinees; I.drops += c.drops; I.revenue += c.revenue;
     for (const [t, n] of Object.entries(c.bySeniority)) I.bySeniority[t] = (I.bySeniority[t] || 0) + n;
     for (const [b, n] of Object.entries(c.byExpBand)) I.byExpBand[b] = (I.byExpBand[b] || 0) + n;
+    for (const [q, n] of Object.entries(c.byQuarter)) I.byQuarter[q] = (I.byQuarter[q] || 0) + n;
+    for (const [m, n] of Object.entries(c.byMonth)) I.byMonth[m] = (I.byMonth[m] || 0) + n;
   });
   Object.values(industries).forEach((I) => {
     I.topCompanies = Object.values(companies)
@@ -258,7 +315,7 @@ async function buildPack() {
   const kb = {};
   KB_TABS.forEach((t, i) => { kb[t.toLowerCase()] = rowsToObjects(kbRows[i]); });
 
-  return { at: Date.now(), totals, companies, industries, byHQ, byFY, byModel, byLocation, clientsWorked, engagement, kb };
+  return { at: Date.now(), totals, companies, industries, byHQ, byFY, byQuarter, byFYQ, byMonth, byModel, byLocation, clientsWorked, engagement, kb };
 }
 
 async function getPack(force = false) {
@@ -444,7 +501,28 @@ function deriveScope(userText, pack) {
     if (re.test(userText)) { seniorityFilter = level; break; }
   }
 
-  return { companies: comps, industries: [...matchedIndustries], directIndustries: [...directIndustries], adjacentIndustries: [...adjacentIndustries], adjacencyNotes, namedIndustries, widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations, seniorityFilter };
+  // Seasonality intent: the query asks about quarters / seasonality / timing-of-year
+  const quarterIntent = /\b(q[1-4]|quarter|quarterly|seasonal|seasonality|time of year|which month|monthly|busiest)\b/i.test(userText);
+
+  // Named calendar months in the query, e.g. "march 2025", "Mar 2025", "2025-03".
+  const MONTH_NAMES = [
+    ['jan(uary)?', 1], ['feb(ruary)?', 2], ['mar(ch)?', 3], ['apr(il)?', 4], ['may', 5], ['jun(e)?', 6],
+    ['jul(y)?', 7], ['aug(ust)?', 8], ['sep(t|tember)?', 9], ['oct(ober)?', 10], ['nov(ember)?', 11], ['dec(ember)?', 12],
+  ];
+  const months = [];
+  for (const [pat, num] of MONTH_NAMES) {
+    // "march 2025" or "2025 march" — a year is required, so a bare month name never guesses.
+    const m = userText.match(new RegExp('\\b' + pat + '\\b[^a-z0-9]{0,6}(20\\d{2})', 'i'))
+           || userText.match(new RegExp('\\b(20\\d{2})[^a-z0-9]{0,6}' + pat + '\\b', 'i'));
+    if (!m) continue;
+    const y = m.slice(1).find((g) => /^20\d{2}$/.test(g || ''));
+    if (y) { const k = y + '-' + String(num).padStart(2, '0'); if (!months.includes(k)) months.push(k); }
+  }
+  // explicit YYYY-MM tokens
+  (userText.match(/\b(20\d{2})-(0[1-9]|1[0-2])\b/g) || []).forEach((k) => { if (!months.includes(k)) months.push(k); });
+  const monthIntent = months.length > 0 || /\b(month|monthly|per month|each month|by month)\b/i.test(userText);
+
+  return { companies: comps, industries: [...matchedIndustries], directIndustries: [...directIndustries], adjacentIndustries: [...adjacentIndustries], adjacencyNotes, namedIndustries, widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations, seniorityFilter, quarterIntent, months, monthIntent };
 }
 
 function companyBlock(c) {
@@ -464,6 +542,8 @@ function companyBlock(c) {
     if (seniorPlus > 0) lines.push(`Senior+ (8+ yrs experience): ${seniorPlus} joinees`);
   }
   if (c.exp && c.exp.count) lines.push(`Years of experience closed: avg ${(c.exp.sum / c.exp.count).toFixed(1)} yrs, range ${c.exp.min}-${c.exp.max} yrs (across ${c.exp.count} with data)`);
+  const cq = QUARTER_ORDER.map((q) => [q, c.byQuarter[q] || 0]).filter(([, n]) => n > 0);
+  if (cq.length) lines.push('By quarter (all years combined, exact): ' + cq.map(([q, n]) => `${q}: ${n}`).join('; '));
   const locs = topEntries(c.byLocation, 6);
   if (locs.length) lines.push('Joining locations (where they joined): ' + locs.map(([l, n]) => `${l} (${n})`).join('; '));
   const prevs = topEntries(c.byPrev, 6);
@@ -480,6 +560,11 @@ function industryBlock(I) {
     lines.push('By experience band: ' + expBands.map(([b, n]) => `${b}: ${n}`).join('; '));
     const seniorPlus = (I.byExpBand['Senior (8-12 yrs)'] || 0) + (I.byExpBand['Very Senior (12-15 yrs)'] || 0) + (I.byExpBand['Leadership (15+ yrs)'] || 0);
     if (seniorPlus > 0) lines.push(`Senior+ (8+ yrs experience): ${seniorPlus} joinees`);
+  }
+  const iq = QUARTER_ORDER.map((q) => [q, I.byQuarter[q] || 0]).filter(([, n]) => n > 0);
+  if (iq.length) {
+    const pk = iq.slice().sort((a, b) => b[1] - a[1])[0];
+    lines.push('By quarter (all years combined, exact): ' + iq.map(([q, n]) => `${q}: ${n}`).join('; ') + ` | peak: ${pk[0]} (${pk[1]})`);
   }
   if (I.topCompanies.length) lines.push('Top companies (by closures): ' + I.topCompanies.slice(0, 15).map((c) => `${c.name} (${c.joinees} joinees, ${fmtRs(c.revenue)})`).join('; '));
   return lines.join('\n');
@@ -501,6 +586,16 @@ function assembleContext(userText, pack) {
   const fyAll = Object.keys(pack.byFY || {}).sort();
   if (fyAll.length) {
     parts.push('## BY FINANCIAL YEAR (exact, all years)\n' + fyAll.map((fy) => { const F = pack.byFY[fy]; return `${fy}: ${F.joinees} joinees, ${F.drops} drops, ${fmtRs(F.revenue)}`; }).join('\n'));
+  }
+  // Seasonality: firm-wide quarter rollup (all years combined) — answers "which quarter do we hire most"
+  {
+    const qRows = QUARTER_ORDER.map((q) => [q, pack.byQuarter[q]]).filter(([, Q]) => Q && Q.joinees);
+    if (qRows.length) {
+      const peak = qRows.slice().sort((a, b) => b[1].joinees - a[1].joinees)[0];
+      parts.push('## BY QUARTER — FIRM-WIDE SEASONALITY (exact, all years combined; Indian FY quarters)\n' +
+        qRows.map(([q, Q]) => `${q}: ${Q.joinees} joinees, ${Q.drops} drops, ${fmtRs(Q.revenue)}`).join('\n') +
+        `\nPeak quarter firm-wide: ${peak[0]} (${peak[1].joinees} joinees).`);
+    }
   }
 
   // EVIDENCE DIRECTNESS — tells the model what's DIRECT vs ADJACENT vs ABSENT for this query
@@ -568,6 +663,49 @@ function assembleContext(userText, pack) {
   // 3e) Specific financial year(s) asked about
   if (scope.fys && scope.fys.length) {
     parts.push('## MATCHED FINANCIAL YEAR (exact)\n' + scope.fys.map((fy) => { const F = pack.byFY[fy]; return `${fy}: ${F.joinees} joinees, ${F.drops} drops, ${fmtRs(F.revenue)}`; }).join('\n'));
+  }
+
+  // 3f-2) Named month(s) — the precise answer to "how many did we close in March 2025 [in X]".
+  // Emits firm-wide, then the scoped industry, then the scoped client, so directness is unambiguous.
+  if (scope.months && scope.months.length) {
+    const blocks = scope.months.map((mk) => {
+      const L = monthLabel(mk);
+      const F = pack.byMonth[mk];
+      const rows = [`### ${L}`];
+      rows.push(F ? `Firm-wide: ${F.joinees} joinees, ${F.drops} drops, ${fmtRs(F.revenue)}`
+                  : `Firm-wide: 0 joinees recorded in ${L} (the month exists in the calendar but has no rows in the tracker).`);
+      scope.industries.forEach((n) => {
+        const I = pack.industries[n];
+        if (I) rows.push(`Industry ${I.name}: ${I.byMonth[mk] || 0} joinees in ${L}`);
+      });
+      scope.companies.forEach((c) => rows.push(`${c.name}: ${c.byMonth[mk] || 0} joinees in ${L}`));
+      return rows.join('\n');
+    });
+    parts.push('## MATCHED MONTH (exact, from raw join dates — this IS tracked; a 0 means genuinely zero that month, not missing data)\n' + blocks.join('\n\n'));
+  }
+
+  // 3f-3) Month-by-month trend when the query is about monthly patterns but names no specific month
+  if (scope.monthIntent && !(scope.months && scope.months.length)) {
+    const keys = Object.keys(pack.byMonth || {}).sort().slice(-24); // last 24 months, bounded
+    if (keys.length) {
+      const scopedInd = scope.industries.map((n) => pack.industries[n]).filter(Boolean).slice(0, 2);
+      const line = (mk) => {
+        const F = pack.byMonth[mk];
+        const extra = scopedInd.map((I) => `${I.name} ${I.byMonth[mk] || 0}`).join(', ');
+        return `${monthLabel(mk)}: ${F.joinees} joinees, ${F.drops} drops${extra ? ' | ' + extra : ''}`;
+      };
+      parts.push('## BY MONTH (exact, last 24 months with data)\n' + keys.map(line).join('\n'));
+    }
+  }
+
+  // 3g) FY x quarter detail — only when the query is actually about seasonality (keeps the prompt lean otherwise)
+  if (scope.quarterIntent) {
+    const keys = Object.keys(pack.byFYQ || {}).sort();
+    if (keys.length) {
+      parts.push('## BY FINANCIAL YEAR x QUARTER (exact, firm-wide)\n' +
+        keys.map((k) => { const Q = pack.byFYQ[k]; return `${k}: ${Q.joinees} joinees, ${Q.drops} drops, ${fmtRs(Q.revenue)}`; }).join('\n') +
+        '\nNOTE: These are firm-wide, not per-industry. Per-industry quarter splits appear in the MATCHED INDUSTRIES block; per-client splits in MATCHED COMPANIES.');
+    }
   }
 
   // 3f) Joining location (India city where candidates joined)

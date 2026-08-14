@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { chat } = require('./netlify/lib/llm');
-const { prepare, parseSections, logQuery, saveFeedback, recentQueries } = require('./netlify/lib/copilot');
+const { prepare, parseSections, logQuery, saveFeedback, recentQueries, recentFeedback, summariseFeedback } = require('./netlify/lib/copilot');
 
 const app = express();
 app.use(express.json());
@@ -55,6 +55,15 @@ app.post('/api/feedback', async (req, res) => {
   if (!b.vote) return res.status(400).json({ error: 'Missing vote' });
   try { await saveFeedback(b); res.json({ ok: true }); }
   catch (e) { console.error('feedback error:', e); res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/feedback — read path for the monthly audit (reporting only; nothing feeds the prompt) ──
+app.get('/api/feedback', async (req, res) => {
+  if (!validateBasicAuth(req)) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const rows = await recentFeedback(1000);
+    res.json({ summary: summariseFeedback(rows), feedback: rows });
+  } catch (e) { console.error('feedback read error:', e); res.status(500).json({ error: e.message }); }
 });
 
 // ── GET /api/queries ──

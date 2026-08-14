@@ -1620,7 +1620,8 @@ function splitSections(t) {
   return { grounded, opinion };
 }
 
-function buildThumbs(container, question, answer, sources) {
+function buildThumbs(container, question, answer, sources, meta) {
+  meta = meta || {};
   container.innerHTML = '<button class="cp-thumb" data-v="up" title="Good answer">👍</button><button class="cp-thumb" data-v="down" title="Wrong or weak">👎</button><span class="cp-thumb-status"></span>';
   container.querySelectorAll('.cp-thumb').forEach(btn => btn.addEventListener('click', () => {
     const vote = btn.dataset.v;
@@ -1631,7 +1632,7 @@ function buildThumbs(container, question, answer, sources) {
     fetch('/api/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + authToken },
-      body: JSON.stringify({ question, answer, vote, note, sources, user: currentUser() }),
+      body: JSON.stringify({ question, answer, vote, note, sources, user: currentUser(), type: meta.type || '', industry: meta.industry || '', confidence: meta.confidence || '' }),
     }).then(r => { status.textContent = r.ok ? 'Thanks — saved' : 'Save failed'; })
       .catch(() => { status.textContent = 'Save failed'; });
   }));
@@ -1670,7 +1671,7 @@ async function askCopilot(question) {
     const srcs = data.sources || '';
     srcEl.textContent = srcs ? ('Sources: ' + srcs) : '';
     actions.style.display = '';
-    buildThumbs(actions, q, (data.grounded || '') + (data.opinion ? '\n\n[READ] ' + data.opinion : ''), srcs);
+    buildThumbs(actions, q, (data.grounded || '') + (data.opinion ? '\n\n[READ] ' + data.opinion : ''), srcs, { type: data.type, industry: data.industry, confidence: conf });
     cpHistory.push({ role: 'user', content: q });
     cpHistory.push({ role: 'assistant', content: data.grounded || '' });
     if (cpHistory.length > 16) cpHistory = cpHistory.slice(-16);
