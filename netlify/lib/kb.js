@@ -646,7 +646,7 @@ function assembleContext(userText, pack) {
   // 6) Doctrine — core definitions always; the rest (ICP/PEEPAL Way/commercials/targeting) only for advice questions
   const doc = pack.kb.doctrine || [];
   const coreCats = new Set(['definition', 'service_term', 'service_line', 'positioning']);
-  const adviceCats = new Set(['icp_firmographic', 'excluded_industry', 'sweet_spot', 'service_fit', 'peepal_way', 'company', 'commercials']);
+  const adviceCats = new Set(['icp_firmographic', 'excluded_industry', 'sweet_spot', 'service_fit', 'peepal_way', 'company', 'commercials', 'key_designations']);
   const wantsCommercials = /\b(commercial|commercials|fee|fees|pricing|price|rate|rates|commission|charge|charges|cost|margin|discount|percentage)\b/i.test(userText);
   const docBase = doc.filter((d) => coreCats.has(d.category) || (adviceIntent && adviceCats.has(d.category)) || (wantsCommercials && (d.category === 'commercials' || d.category === 'service_line')));
   const docScoped = doc.filter((d) => !coreCats.has(d.category) && !adviceCats.has(d.category) && (
@@ -665,7 +665,7 @@ function assembleContext(userText, pack) {
   // 7) Playbook — the how-to-sell chapters, only for advice questions
   if (adviceIntent) {
     const pb = pack.kb.playbook || [];
-    const pbCats = new Set(['mindset', 'first_call', 'discovery', 'data_usage', 'meeting_run', 'followup', 'reliability', 'reactivation', 'at_risk', 'delivery', 'research']);
+    const pbCats = new Set(['mindset', 'first_call', 'discovery', 'data_usage', 'meeting_run', 'meeting_prep', 'followup', 'reliability', 'reactivation', 'at_risk', 'delivery', 'research', 'personal_dev', 'operating_model', 'operating_rhythm']);
     const pbRows = pb.filter((p) => pbCats.has(p.category));
     if (pbRows.length) parts.push('## PLAYBOOK (how to sell)\n' + pbRows.map((p) => `- [${p.category}] ${p.item}${p.detail ? ': ' + p.detail : ''}${p.action ? ' | ' + p.action : ''}`).join('\n'));
   }
