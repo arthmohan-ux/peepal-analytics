@@ -391,27 +391,65 @@ function deriveScope(userText, pack) {
   const JUNK_INDUSTRIES = new Set(['unknown', 'check', 'test', 'tbd', 'na', 'n/a', '-', '']);
   // DIRECT: the industry name literally appears in the query.
   const directIndustries = new Set();
+  // Sheet labels are abbreviated ("IT Prod", "FMCG, Retail & Consumer Commerc") while reps type the
+  // full word ("IT Product"). Strict word-boundary matching misses those, so also compare the
+  // normalized forms in both directions — "itproduct" vs "itprod" resolves either way.
+  const normQuery = norm(userText);
   for (const I of Object.values(pack.industries)) {
     if (!I.name || JUNK_INDUSTRIES.has(I.name.toLowerCase().trim())) continue;
     const re = phraseRegex(I.name);
-    if (re && re.test(lowerText)) directIndustries.add(I.name);
+    if (re && re.test(lowerText)) { directIndustries.add(I.name); continue; }
+    const ni = norm(I.name);
+    if (ni.length >= 4 && (normQuery.includes(ni) || (ni.length >= 6 && ni.startsWith(normQuery.slice(-ni.length))))) {
+      directIndustries.add(I.name);
+    }
   }
   // ADJACENT: a sub-vertical word (fintech, solar) maps to a PARENT/related industry we track.
+  // ── DIRECT ALIASES ───────────────────────────────────────────────────────────
+  // The query word MEANS a tracked industry — "banking" IS the B in BFSI, "pharma" IS the
+  // Pharma tab. Evidence here is DIRECT and must NOT be hedged as adjacent.
+  const DIRECT_ALIASES = [
+    [/\b(bfsi|bank|banks|banking|finance|financial|financial services|wealth management|asset management|capital markets)\b/i, 'bfsi'],
+    [/\b(insurance|insurer|insurers|underwriting)\b/i, 'bfsi'],
+    [/\b(pharma|pharmaceutical|pharmaceuticals|life sciences|healthcare|health care|health-tech|healthtech)\b/i, 'pharma'],
+    [/\b(telecom|telecoms|telco|telcos|telecommunications)\b/i, 'telecom'],
+    [/\b(manufacturing|manufacture|manufacturer|manufacturers|engineering|industrial)\b/i, 'manufactur'],
+    [/\b(consulting|consultancy|advisory|professional services|audit|audit firm)\b/i, 'consulting'],
+    [/\b(aviation|airline|airlines|carrier|carriers)\b/i, 'aviation'],
+    [/\b(real estate|realty|property)\b/i, 'realestate'],
+    [/\b(fmcg|retail|consumer goods|consumer commerce|cpg)\b/i, 'fmcg'],
+    [/\b(media|entertainment|ott|broadcasting)\b/i, 'media'],
+  ];
+  // "IT" is also the English pronoun, so it needs a tighter test than a bare word match:
+  // uppercase IT is unambiguous; lowercase needs a sector word or a trailing "in/just it".
+  const itSector = /\bIT\b/.test(userText)
+    || /\b(it|i\.?t\.?)[\s\-/&]*(sector|industry|space|vertical|prod|product|products|services|service|companies|clients|firms|hiring|roles|side|talent)\b/i.test(userText)
+    || /\b(in|for|within|across|just|only|about)\s+it\b\s*[?.!]*$/i.test(String(userText).trim())
+    || /\b(tech|technology|software|saas|product companies|product firms)\b/i.test(userText);
+
+  // ── GENUINE ADJACENCIES ──────────────────────────────────────────────────────
+  // The query word is a space we do NOT track; the listed industry is the closest parent.
+  // These keep the "say adjacent out loud" behaviour.
   const INDUSTRY_SYNONYMS = [
-    ['tech', 'it'], ['technology', 'it'], ['software', 'it'], ['saas', 'it'],
-    ['banking', 'bfsi'], ['bank', 'bfsi'], ['finance', 'bfsi'], ['financial', 'bfsi'], ['fintech', 'bfsi'], ['insurance', 'bfsi'],
-    ['airline', 'aviation'], ['airlines', 'aviation'], ['aerospace', 'aviation'],
-    ['telecom', 'telecom'], ['telco', 'telecom'],
-    ['pharma', 'pharma'], ['pharmaceutical', 'pharma'], ['healthcare', 'pharma'],
-    ['manufacturing', 'manufactur'], ['engineering', 'manufactur'],
-    ['retail', 'fmcg'], ['fmcg', 'fmcg'], ['consumer', 'fmcg'],
-    ['media', 'media'], ['entertainment', 'media'],
-    ['consulting', 'consulting'], ['advisory', 'consulting'],
+    ['fintech', 'bfsi'],
+    ['aerospace', 'aviation'], ['defence', 'aviation'], ['defense', 'aviation'],
     ['solar', 'manufactur'], ['renewable', 'manufactur'], ['cleantech', 'manufactur'], ['clean energy', 'manufactur'],
     ['energy', 'manufactur'], ['battery', 'manufactur'], ['ev', 'manufactur'], ['electric vehicle', 'manufactur'],
-    ['automotive', 'manufactur'], ['auto', 'manufactur'], ['industrial', 'manufactur'], ['electronics', 'it'], ['hardware', 'it'],
-    ['semiconductor', 'manufactur'], ['semiconductors', 'manufactur'], ['chip', 'manufactur'], ['chips', 'manufactur'], ['medtech', 'manufactur'], ['medical device', 'manufactur'],
+    ['automotive', 'manufactur'], ['auto', 'manufactur'],
+    ['semiconductor', 'manufactur'], ['semiconductors', 'manufactur'], ['chip', 'manufactur'], ['chips', 'manufactur'],
+    ['medtech', 'manufactur'], ['medical device', 'manufactur'], ['medical devices', 'manufactur'],
+    ['electronics', 'it'], ['hardware', 'it'],
   ];
+
+  // apply direct aliases first, so the adjacency pass below skips anything already DIRECT
+  const addBySub = (sub) => {
+    for (const I of Object.values(pack.industries)) {
+      if (!I.name || JUNK_INDUSTRIES.has(I.name.toLowerCase().trim())) continue;
+      if (norm(I.name).includes(sub)) directIndustries.add(I.name);
+    }
+  };
+  for (const [re, sub] of DIRECT_ALIASES) if (re.test(userText)) addBySub(sub);
+  if (itSector) addBySub('it');
   const adjacentIndustries = new Set();
   const adjacencyNotes = []; // { term, industries } — the query mentioned a space we don't directly track
   for (const [kw, indSub] of INDUSTRY_SYNONYMS) {
@@ -509,17 +547,30 @@ function deriveScope(userText, pack) {
     ['jan(uary)?', 1], ['feb(ruary)?', 2], ['mar(ch)?', 3], ['apr(il)?', 4], ['may', 5], ['jun(e)?', 6],
     ['jul(y)?', 7], ['aug(ust)?', 8], ['sep(t|tember)?', 9], ['oct(ober)?', 10], ['nov(ember)?', 11], ['dec(ember)?', 12],
   ];
-  const months = [];
+  // Collect EVERY month+year in the text, not just the first — otherwise a month named in the
+  // previous turn wins over the one in the current question. The current question is repeated 3x
+  // in the scope text, so ranking by hit-count puts the current ask first.
+  const monthHits = {};
+  const bumpMonth = (y, num) => {
+    const k = y + '-' + String(num).padStart(2, '0');
+    monthHits[k] = (monthHits[k] || 0) + 1;
+  };
   for (const [pat, num] of MONTH_NAMES) {
     // "march 2025" or "2025 march" — a year is required, so a bare month name never guesses.
-    const m = userText.match(new RegExp('\\b' + pat + '\\b[^a-z0-9]{0,6}(20\\d{2})', 'i'))
-           || userText.match(new RegExp('\\b(20\\d{2})[^a-z0-9]{0,6}' + pat + '\\b', 'i'));
-    if (!m) continue;
-    const y = m.slice(1).find((g) => /^20\d{2}$/.test(g || ''));
-    if (y) { const k = y + '-' + String(num).padStart(2, '0'); if (!months.includes(k)) months.push(k); }
+    for (const m of userText.matchAll(new RegExp('\\b' + pat + '\\b[^a-z0-9]{0,6}(20\\d{2})', 'gi'))) {
+      const y = m.slice(1).find((g) => /^20\d{2}$/.test(g || '')); if (y) bumpMonth(y, num);
+    }
+    for (const m of userText.matchAll(new RegExp('\\b(20\\d{2})[^a-z0-9]{0,6}' + pat + '\\b', 'gi'))) {
+      const y = m.slice(1).find((g) => /^20\d{2}$/.test(g || '')); if (y) bumpMonth(y, num);
+    }
   }
   // explicit YYYY-MM tokens
-  (userText.match(/\b(20\d{2})-(0[1-9]|1[0-2])\b/g) || []).forEach((k) => { if (!months.includes(k)) months.push(k); });
+  (userText.match(/\b(20\d{2})-(0[1-9]|1[0-2])\b/g) || []).forEach((k) => { monthHits[k] = (monthHits[k] || 0) + 1; });
+  // most-mentioned first (= the current question), newest first as a tiebreak; capped to bound the prompt
+  const months = Object.entries(monthHits)
+    .sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]))
+    .slice(0, 4)
+    .map(([k]) => k);
   const monthIntent = months.length > 0 || /\b(month|monthly|per month|each month|by month)\b/i.test(userText);
 
   return { companies: comps, industries: [...matchedIndustries], directIndustries: [...directIndustries], adjacentIndustries: [...adjacentIndustries], adjacencyNotes, namedIndustries, widenedIndustries: [...widened], skills: skills.slice(0, 3), hqs, models, fys, locations, seniorityFilter, quarterIntent, months, monthIntent };
