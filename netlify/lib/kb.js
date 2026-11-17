@@ -368,11 +368,22 @@ async function buildPack() {
   };
 }
 
+// Stale-while-revalidate: once a pack exists, a rep never waits on a sheet re-read.
+// An expired pack is served as-is while a fresh one builds in the background.
+// Concurrent callers share one build.
+let _building = null;
+function rebuildPack() {
+  if (!_building) {
+    _building = buildPack()
+      .then((pack) => { _cache = { at: Date.now(), pack }; return pack; })
+      .finally(() => { _building = null; });
+  }
+  return _building;
+}
 async function getPack(force = false) {
-  if (!force && _cache && (Date.now() - _cache.at) < CACHE_TTL_MS) return _cache.pack;
-  const pack = await buildPack();
-  _cache = { at: Date.now(), pack };
-  return pack;
+  if (force || !_cache) return rebuildPack();
+  if (Date.now() - _cache.at >= CACHE_TTL_MS) rebuildPack().catch((e) => console.error('Copilot pack refresh failed:', e.message));
+  return _cache.pack;
 }
 function clearPack() { _cache = null; }
 

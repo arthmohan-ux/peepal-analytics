@@ -204,11 +204,14 @@ async function saveFeedback({ question, answer, vote, note, sources, user, type,
 async function answer({ question, history, user }, onEvent) {
   const t0 = Date.now();
   const prep = await prepare(question, history);
+  const tPrep = Date.now();
   if (onEvent) onEvent({ type: 'meta', facts: prep.meta.facts, evidence: prep.meta.evidence, mode: prep.meta.mode, answerType: prep.meta.type });
   let result;
   if (onEvent) result = await llm.streamChat(prep.messages, { temperature: 0.2, maxTokens: 3000 }, (d) => onEvent({ type: 'delta', text: d }));
   else result = await llm.chat(prep.messages, { temperature: 0.2, maxTokens: 3000 });
   const out = finalise(parseSections(result.text), prep.meta, result.model, Date.now() - t0);
+  out.prepMs = tPrep - t0;
+  if (result.tried && result.tried.length) out.tried = result.tried; // models that failed or lost the race, for debugging
   // Fire and forget: the rep should not wait on a sheet write.
   logQuery({ question, type: out.type, industry: out.industry, confidence: out.confidence, sources: out.sources, user, evidence: out.evidence, matched: prep.meta.matched, ms: out.ms, model: out.model });
   return out;
@@ -290,7 +293,7 @@ async function gapReport(days = 30) {
 async function health() {
   const pack = await getPack();
   return {
-    model: llm.MODEL, fallbacks: llm.candidateModels().slice(1), packBuiltAt: new Date(pack.at).toISOString(),
+    model: llm.MODEL, fallbacks: llm.candidateModels().slice(1), models: llm.status(), packBuiltAt: new Date(pack.at).toISOString(),
     joinees: pack.totals.joinees, offerDrops: pack.totals.drops, clients: pack.totals.companies,
     latestJoinee: pack.coverage.lastJoin, latestOfferDrop: pack.coverage.lastOffer, unparseableDates: pack.coverage.badDates,
     clientsWithoutIndustry: pack.coverage.junkIndustryClients.length, clientsWithoutIndustrySample: pack.coverage.junkIndustryClients.slice(0, 25),

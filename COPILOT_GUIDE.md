@@ -137,11 +137,24 @@ Set in Render, Environment.
 | Variable | Value | Why |
 |---|---|---|
 | `LLM_API_KEY` | your key | unchanged |
-| `LLM_MODEL` | `gemini-3.8-flash` | The repo defaulted to Flash-Lite to fit Netlify's function timeout. Render has no such limit, and answers now stream. |
-| `LLM_REASONING_EFFORT` | `low` | Counting is done in code, so the model only phrases. Low keeps it fast. |
+| `LLM_MODEL` | `gemini-3.8-flash` | Primary model. If it is slow or rate-limited, the chain below covers it. |
+| `LLM_REASONING_EFFORT` | `minimal` | Counting is done in code, so the model only phrases. If a model rejects `minimal`, the code steps up to `low` for that model by itself. |
 | `LLM_FALLBACK_MODELS` | optional | Defaults to 3.6 Flash, then 3.5 Flash-Lite, then 3.1 Flash-Lite. |
+| `LLM_HEDGE_MS` | optional, default `6000` | If the current model has not started writing by then, the next one starts alongside it. First to write wins. |
+| `LLM_FIRST_TOKEN_MS` | optional, default `12000` | A model silent this long is dropped for that question. |
+| `LLM_COOLDOWN_MS` | optional, default `300000` | A model that failed or lost a race by being silent is skipped for 5 minutes, so it costs one slow answer, not every answer. |
 
-Free tier or paid: the free tier works. The reason to attach billing is data use, not quality. Prompts carry client names, closure counts and billing figures.
+### Why an answer is slow
+
+Retrieval takes well under a second. Nearly all wait time is the model. Open `/api/copilot/health` and read `models`:
+
+- `ok: true` on every model: the model is just slow. Lower `LLM_REASONING_EFFORT`, or move a Flash-Lite model to the front of the chain.
+- `coolingForSec` on the primary with a `429` in `lastError`: you are hitting the free-tier rate limit on that model. Put the model that keeps answering first in `LLM_MODEL`, or attach billing.
+- `coolingForSec` with "silent" or "no answer": the model is overloaded at Google's end. The chain is already covering it.
+
+Every streamed answer also carries `model` and, when something failed, `tried`, so you can see which model answered and what lost.
+
+Free tier or paid: the free tier works. The reason to attach billing is data use and rate limits, not quality. Prompts carry client names, closure counts and billing figures.
 
 To try another provider, change `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`. Any OpenAI-compatible endpoint works. Run the same ten questions on both and compare before switching.
 

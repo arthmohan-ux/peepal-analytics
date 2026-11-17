@@ -20,4 +20,4 @@ services:
       - key: LLM_MODEL
         value: gemini-3.8-flash
       - key: LLM_REASONING_EFFORT
-        value: low
+        value: minimal
