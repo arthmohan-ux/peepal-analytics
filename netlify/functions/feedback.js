@@ -16,7 +16,7 @@ exports.handler = async (event) => {
   try { b = JSON.parse(event.body || '{}'); } catch { return { statusCode: 400, body: JSON.stringify({ error: 'Bad request' }) }; }
   if (!b.vote) return { statusCode: 400, body: JSON.stringify({ error: 'Missing vote' }) };
   try {
-    await saveFeedback({ question: b.question, answer: b.answer, vote: b.vote, note: b.note, sources: b.sources, user: b.user });
+    await saveFeedback({ question: b.question, answer: b.answer, vote: b.vote, note: b.note, sources: b.sources, user: b.user, type: b.type, industry: b.industry, confidence: b.confidence });
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true }) };
   } catch (e) {
     console.error('feedback error:', e);

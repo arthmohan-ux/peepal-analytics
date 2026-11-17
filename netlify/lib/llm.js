@@ -1,142 +1,139 @@
 // netlify/lib/llm.js
 // Provider-agnostic chat completion over any OpenAI-compatible endpoint.
-// Configured for Google Gemini (free tier) by default; swap providers via env vars only.
-//   LLM_API_KEY    (required)  your Gemini AI Studio key
-//   LLM_BASE_URL   (optional)  default https://generativelanguage.googleapis.com/v1beta/openai
-//   LLM_MODEL      (optional)  default gemini-3.5-flash
-// Back-compat aliases still read: MOONSHOT_API_KEY / MOONSHOT_MODEL / MOONSHOT_BASE_URL
+// Everything is set through env vars, so changing model or provider needs no code change.
 //
-// Self-healing: if the configured model returns a "not found / deprecated" error on a
-// Gemini endpoint, it falls through a list of known-good Gemini models automatically,
-// and if JSON mode isn't supported it retries without it. This means model-name drift
-// never requires a redeploy.
+//   LLM_API_KEY            required   Gemini AI Studio key (or any OpenAI-compatible key)
+//   LLM_BASE_URL           optional   default https://generativelanguage.googleapis.com/v1beta/openai
+//   LLM_MODEL              optional   default gemini-3.8-flash
+//   LLM_FALLBACK_MODELS    optional   comma list tried in order if the primary is missing or overloaded
+//   LLM_REASONING_EFFORT   optional   minimal | low | medium | high. Default "low": the hard work
+//                                     (filtering, counting) is done in kb.js, so the model only has
+//                                     to phrase. Low keeps answers fast enough to use on a live call.
+//                                     Set to "off" to send nothing (for providers that reject the field).
+//   LLM_TIMEOUT_MS         optional   default 45000
+// Back-compat aliases still read: MOONSHOT_API_KEY / MOONSHOT_MODEL / MOONSHOT_BASE_URL
 
 const API_KEY = process.env.LLM_API_KEY || process.env.MOONSHOT_API_KEY;
 const BASE_URL = (process.env.LLM_BASE_URL || process.env.MOONSHOT_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/$/, '');
-// Default to Flash-Lite: it barely "thinks", so it returns in a few seconds and stays
-// under Netlify's function timeout. The heavy thinking models (plain Flash) time out.
-const PRIMARY_MODEL = process.env.LLM_MODEL || process.env.MOONSHOT_MODEL || 'gemini-3.5-flash-lite';
-
+const PRIMARY_MODEL = process.env.LLM_MODEL || process.env.MOONSHOT_MODEL || 'gemini-3.8-flash';
 const IS_GEMINI = /googleapis\.com/i.test(BASE_URL);
-const GEMINI_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash'];
-
-const MODEL = PRIMARY_MODEL; // exported for debug display
+const FALLBACKS = (process.env.LLM_FALLBACK_MODELS || (IS_GEMINI ? 'gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite' : ''))
+  .split(',').map((s) => s.trim()).filter(Boolean);
+const EFFORT = (process.env.LLM_REASONING_EFFORT || 'low').toLowerCase();
+const TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS || '45000', 10);
+const MODEL = PRIMARY_MODEL;
 
 function candidateModels() {
   const list = [PRIMARY_MODEL];
-  if (IS_GEMINI) for (const m of GEMINI_FALLBACKS) if (!list.includes(m)) list.push(m);
+  for (const m of FALLBACKS) if (!list.includes(m)) list.push(m);
   return list;
 }
 
-async function callOnce(model, messages, { temperature, maxTokens }, useJson) {
-  const body = { model, messages, temperature, max_tokens: maxTokens };
-  if (useJson) body.response_format = { type: 'json_object' };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Move to the next model only when this one is gone or overloaded. A bad key (401/403)
+// fails the same way on every model, so it is raised immediately instead of retried.
+const isMissing = (e) => e.status === 404 || /not\s*found|does not exist|no longer available|is not supported|deprecated/i.test(e.message);
+const isTransient = (e) => [408, 429, 500, 502, 503, 504].includes(e.status) || e.name === 'AbortError' || /overloaded|unavailable|high demand|timed? ?out|ECONNRESET|fetch failed/i.test(e.message);
+const isAuth = (e) => e.status === 401 || e.status === 403;
+
+async function post(body, signal) {
   const res = await fetch(`${BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    const err = new Error(`LLM ${res.status}: ${detail.slice(0, 500)}`);
+    const err = new Error(`LLM ${res.status}: ${detail.slice(0, 400)}`);
     err.status = res.status;
     throw err;
   }
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || '';
+  return res;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const isMissing = (m) => /404|not\s*found|not_found|does not exist|no longer available|unsupported|permission|403/i.test(m);
-const isTransient = (m) => /\b(429|500|502|503|504)\b|unavailable|overloaded|high demand|rate.?limit|try again|deadline|timeout/i.test(m);
+function buildBody(model, messages, { temperature, maxTokens }, withEffort, stream) {
+  const body = { model, messages, temperature, max_tokens: maxTokens };
+  if (withEffort && EFFORT && EFFORT !== 'off') body.reasoning_effort = EFFORT;
+  if (stream) body.stream = true;
+  return body;
+}
 
-async function chat(messages, { temperature = 0.3, jsonMode = true, maxTokens = 1400 } = {}) {
+// Runs fn(model, withEffort) across the candidate models with retry on overload.
+// If a provider rejects reasoning_effort (400), retries that model once without it.
+async function withFallback(fn) {
   if (!API_KEY) throw new Error('LLM_API_KEY is not set');
-  const opts = { temperature, maxTokens };
-  const models = candidateModels();
   let lastErr;
-
-  for (const model of models) {
-    // up to 3 attempts per model to ride out transient overloads (503/429)
+  for (const model of candidateModels()) {
+    let withEffort = true;
     for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        return await callOnce(model, messages, opts, jsonMode);
-      } catch (e) {
+      try { return await fn(model, withEffort); }
+      catch (e) {
         lastErr = e;
-        const msg = String(e.message || '');
-        // JSON mode unsupported? retry same model once without it.
-        if (jsonMode && /response_format|json|invalid_request|400/i.test(msg)) {
-          try { return await callOnce(model, messages, opts, false); }
-          catch (e2) { lastErr = e2; }
-        }
-        if (isTransient(msg) && attempt < 2) { await sleep(700 * (attempt + 1)); continue; } // retry same model
-        break; // give up on this model; try the next candidate
-      }
-    }
-    // only move to the next model for missing/deprecated or exhausted-transient errors
-    if (!isMissing(String(lastErr.message)) && !isTransient(String(lastErr.message))) throw lastErr;
-  }
-  throw lastErr;
-}
-
-// ── streaming ────────────────────────────────────────────────────────────────
-async function streamOnce(model, messages, { temperature, maxTokens }, onDelta) {
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-    body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream: true }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    const err = new Error(`LLM ${res.status}: ${detail.slice(0, 300)}`);
-    err.status = res.status;
-    throw err;
-  }
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let buf = '';
-  let full = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') continue;
-      try {
-        const j = JSON.parse(data);
-        const delta = j.choices?.[0]?.delta?.content || '';
-        if (delta) { full += delta; onDelta(delta); }
-      } catch (_) { /* ignore keep-alives / partial lines */ }
-    }
-  }
-  return full;
-}
-
-// Streams tokens via onDelta(text). Returns the full text. Falls through models on
-// missing/transient errors just like chat().
-async function streamChat(messages, { temperature = 0.3, maxTokens = 1600 } = {}, onDelta = () => {}) {
-  if (!API_KEY) throw new Error('LLM_API_KEY is not set');
-  const models = candidateModels();
-  let lastErr;
-  for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        return await streamOnce(model, messages, { temperature, maxTokens }, onDelta);
-      } catch (e) {
-        lastErr = e;
-        const m = String(e.message || '');
-        if (isTransient(m) && attempt < 1) { await sleep(700); continue; }
+        if (isAuth(e)) throw e;
+        if (e.status === 400 && withEffort && /reasoning|effort|unknown (name|field)|unrecognized/i.test(e.message)) { withEffort = false; continue; }
+        if (isTransient(e) && attempt < 2) { await sleep(600 * (attempt + 1)); continue; }
         break;
       }
     }
-    if (!isMissing(String(lastErr.message)) && !isTransient(String(lastErr.message))) throw lastErr;
+    if (!isMissing(lastErr) && !isTransient(lastErr)) throw lastErr;
   }
   throw lastErr;
 }
 
-module.exports = { chat, streamChat, MODEL };
+// Returns { text, model }.
+async function chat(messages, { temperature = 0.2, maxTokens = 3000 } = {}) {
+  return withFallback(async (model, withEffort) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+    try {
+      const res = await post(buildBody(model, messages, { temperature, maxTokens }, withEffort, false), ctl.signal);
+      const data = await res.json();
+      const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+      if (!text.trim()) { const e = new Error('LLM returned an empty answer (finish_reason: ' + ((data.choices && data.choices[0] && data.choices[0].finish_reason) || 'unknown') + ')'); e.status = 503; throw e; }
+      return { text, model };
+    } finally { clearTimeout(timer); }
+  });
+}
+
+// Streams tokens through onDelta(text). Returns { text, model }.
+// Once a model has started emitting text we never switch models mid-answer.
+async function streamChat(messages, { temperature = 0.2, maxTokens = 3000 } = {}, onDelta = () => {}) {
+  return withFallback(async (model, withEffort) => {
+    const ctl = new AbortController();
+    let timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+    let full = '';
+    try {
+      const res = await post(buildBody(model, messages, { temperature, maxTokens }, withEffort, true), ctl.signal);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        clearTimeout(timer); timer = setTimeout(() => ctl.abort(), TIMEOUT_MS); // idle timeout, reset per chunk
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const j = JSON.parse(payload);
+            const delta = (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || '';
+            if (delta) { full += delta; onDelta(delta); }
+          } catch (_) { /* keep-alive or partial line */ }
+        }
+      }
+      if (!full.trim()) { const e = new Error('LLM stream ended with no text'); e.status = 503; throw e; }
+      return { text: full, model };
+    } catch (e) {
+      if (full) { e.status = 0; e.message = 'stream interrupted: ' + e.message; e.partial = full; } // do not retry a half-sent answer
+      throw e;
+    } finally { clearTimeout(timer); }
+  });
+}
+
+module.exports = { chat, streamChat, MODEL, candidateModels };

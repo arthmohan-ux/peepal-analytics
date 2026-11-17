@@ -291,6 +291,34 @@
     #cp-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,90,61,0.1); }
     #cp-send { padding: 10px 20px; }
 
+
+    /* ── COPILOT v2: say / proof / ask / internal read ── */
+    .cp-facts { display: flex; flex-wrap: wrap; gap: 8px; }
+    .cp-fact { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; min-width: 120px; max-width: 280px; }
+    .cp-fact .l { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-light); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cp-fact .v { font-size: 0.98rem; font-weight: 600; color: var(--text-dark); line-height: 1.3; }
+    .cp-fact .s { font-size: 0.72rem; color: var(--text-mid); line-height: 1.35; }
+    .cp-say { background: var(--surface); border: 1px solid var(--accent); border-left: 4px solid var(--accent); border-radius: 12px; padding: 16px 18px; font-size: 1.02rem; line-height: 1.65; color: var(--text-dark); }
+    .cp-say.internal { border-color: var(--border-mid); border-left-color: #9a6a2a; }
+    .cp-h { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; color: var(--text-light); }
+    .cp-say .cp-h { color: var(--accent); } .cp-say.internal .cp-h { color: #9a6a2a; }
+    .cp-ev { font-size: 0.64rem; font-weight: 600; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; }
+    .cp-ev.direct { background: #e3efe7; color: #2d5a3d; } .cp-ev.adjacent { background: #f4ecdf; color: #9a6a2a; } .cp-ev.absent { background: #f4e0e0; color: #a53a3a; }
+    .cp-copy { margin-left: auto; background: none; border: 1px solid var(--border-mid); border-radius: 6px; padding: 2px 9px; font-size: 0.7rem; font-family: 'DM Sans', sans-serif; color: var(--text-mid); cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 500; }
+    .cp-copy:hover { border-color: var(--accent); color: var(--accent); }
+    .cp-two { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
+    @media (max-width: 760px) { .cp-two { grid-template-columns: 1fr; } }
+    .cp-box { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 13px 16px; font-size: 0.87rem; line-height: 1.55; color: var(--text-dark); }
+    .cp-box ul { margin: 2px 0 2px 18px; } .cp-box li { margin-bottom: 5px; }
+    .cp-box .tag { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 6px; border-radius: 100px; margin-left: 4px; white-space: nowrap; }
+    .cp-box .tag.direct { background: #e3efe7; color: #2d5a3d; } .cp-box .tag.adjacent { background: #f4ecdf; color: #9a6a2a; }
+    .cp-askbox { font-size: 0.95rem; font-style: italic; }
+    .cp-note { flex: 1; max-width: 420px; border: 1px solid var(--border-mid); border-radius: 7px; padding: 5px 10px; font-family: 'DM Sans', sans-serif; font-size: 0.8rem; background: var(--surface); color: var(--text-dark); }
+    .cp-note-send { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 5px 12px; font-size: 0.78rem; font-family: 'DM Sans', sans-serif; cursor: pointer; }
+    .cp-who { border: 1px solid var(--border-mid); border-radius: 8px; padding: 7px 10px; font-family: 'DM Sans', sans-serif; font-size: 0.8rem; width: 130px; background: var(--surface); color: var(--text-dark); }
+    .cp-who:focus, .cp-note:focus { outline: none; border-color: var(--accent); }
+    .cp-cursor::after { content: '▍'; color: var(--accent); animation: cpPulse 1s ease-in-out infinite; margin-left: 1px; }
+
     /* answer actions (thumbs) */
     .cp-actions { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
     .cp-thumb { background: none; border: 1px solid var(--border-mid); border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 0.9rem; transition: all 0.15s; }
@@ -604,10 +632,12 @@
           <button class="cp-side-toggle" id="cp-sidebar-toggle" title="Recent questions">☰</button>
           <div>
             <h1>BD Copilot</h1>
-            <p>Ask about what we've done — by company, industry, role or seniority — and get call-ready talking points plus an internal read.</p>
+            <p>Ask what we've done by client, industry, role, seniority or date. You get a line to say, proof behind it, a question to ask next, and a private read.</p>
           </div>
         </div>
         <div style="display:flex; gap:8px; flex-shrink:0;">
+          <input class="cp-who" id="cp-who" placeholder="Your name" title="Used to tag your questions in the query log" maxlength="40">
+          <button class="btn-secondary" id="cp-reload" title="Re-read the Google Sheet now. Use after editing Sources, Playbook, Coaching or Aliases.">⟳ Reload data</button>
           <button class="btn-secondary" id="cp-refresh">↺ New chat</button>
           <button class="btn-secondary" id="cp-viewall">View all queries</button>
         </div>
@@ -621,12 +651,13 @@
           <div class="copilot-messages" id="cp-messages">
             <div class="cp-empty" id="cp-empty">
               <div class="cp-empty-icon">◇</div>
-              <p>Ask a question to get grounded talking points for a BD call.</p>
+              <p>Ask a question. Type a client name, even half of it, and the Copilot will find it.</p>
               <div class="cp-examples">
                 <button class="cp-chip">What have we done for EY GDS?</button>
-                <button class="cp-chip">Who else in BFSI can I name-drop?</button>
-                <button class="cp-chip">Client says they have a strong internal team — what do I say?</button>
-                <button class="cp-chip">Our track record in aviation</button>
+                <button class="cp-chip">Java hires in BFSI, and what experience range?</button>
+                <button class="cp-chip">Client says they have a strong internal team. What do I say?</button>
+                <button class="cp-chip">I'm talking to a solar company, what can I say?</button>
+                <button class="cp-chip">How many roles did we close in the last 6 months, by client?</button>
               </div>
             </div>
           </div>
@@ -1750,36 +1781,74 @@ function cpAddUser(text) {
 }
 
 function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-function currentUser() { try { return atob(authToken).split(':')[0] || ''; } catch { return ''; } }
-
-// Split streamed delimited text into grounded / opinion for live rendering.
-function splitSections(t) {
-  t = String(t || '');
-  const sayI = t.indexOf('[[SAY]]'), readI = t.indexOf('[[READ]]'), metaI = t.indexOf('[[META]]');
-  const gStart = sayI >= 0 ? sayI + 7 : 0;
-  const gEnd = readI >= 0 ? readI : (metaI >= 0 ? metaI : t.length);
-  let grounded = t.slice(gStart, gEnd).trim();
-  let opinion = '';
-  if (readI >= 0) { const oEnd = metaI >= 0 ? metaI : t.length; opinion = t.slice(readI + 8, oEnd).trim(); }
-  return { grounded, opinion };
+// Who is asking. Everyone shares one login, so the name typed in the Copilot header is what tags the query log.
+function loginUser() { try { const d = atob(authToken); return d.slice(0, d.indexOf(':')) || ''; } catch { return ''; } }
+function currentUser() {
+  let n = ''; try { n = (localStorage.getItem('cp_who') || '').trim(); } catch {}
+  return n || loginUser();
 }
+(function initWho() {
+  const el = document.getElementById('cp-who'); if (!el) return;
+  try { el.value = localStorage.getItem('cp_who') || ''; } catch {}
+  el.addEventListener('change', () => { try { localStorage.setItem('cp_who', el.value.trim()); } catch {} });
+})();
+
+// Split the model's delimited text (complete or still streaming) into its sections.
+function cpSplit(t) {
+  t = String(t || '');
+  const out = { say: '', proof: '', ask: '', read: '' };
+  const re = /\[\[(SAY|PROOF|ASK|READ|META)\]\]/gi; const marks = []; let m;
+  while ((m = re.exec(t))) marks.push({ key: m[1].toLowerCase(), i: m.index, end: m.index + m[0].length });
+  if (!marks.length) { out.say = t.replace(/\[\[?[A-Z]*\]?\]?$/, ''); return out; }
+  marks.forEach((mk, i) => {
+    const end = i + 1 < marks.length ? marks[i + 1].i : t.length;
+    if (mk.key in out && !out[mk.key]) out[mk.key] = t.slice(mk.end, end).replace(/\[\[?[A-Z]*\]?\]?$/, '').trim();
+  });
+  return out;
+}
+// Proof bullets: turn a trailing "(direct)" / "(adjacent)" into a small tag.
+function proofHtml(s) {
+  return mdLite(s).replace(/\((direct|adjacent)\)\s*(<\/li>|<\/p>)/gi, (x, k, close) => '<span class="tag ' + k.toLowerCase() + '">' + k.toLowerCase() + '</span>' + close);
+}
+function plainText(s) { return String(s || '').replace(/\*\*/g, '').replace(/\*/g, '').trim(); }
+function cpCopy(btn, text) {
+  const done = () => { const o = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = o; }, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => {});
+  else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch {} ta.remove(); }
+}
+const EV_LABEL = { direct: 'Direct proof', adjacent: 'Closest proof, not exact', absent: 'No proof on record' };
 
 function buildThumbs(container, question, answer, sources, meta) {
   meta = meta || {};
-  container.innerHTML = '<button class="cp-thumb" data-v="up" title="Good answer">👍</button><button class="cp-thumb" data-v="down" title="Wrong or weak">👎</button><span class="cp-thumb-status"></span>';
-  container.querySelectorAll('.cp-thumb').forEach(btn => btn.addEventListener('click', () => {
-    const vote = btn.dataset.v;
-    const note = window.prompt(vote === 'up' ? 'What made this answer good? (optional)' : 'What was wrong or missing? (optional)') || '';
-    container.querySelectorAll('.cp-thumb').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    const status = container.querySelector('.cp-thumb-status'); status.textContent = 'Saving…';
+  container.innerHTML = '<button class="cp-thumb" data-v="up" title="Good answer">👍</button><button class="cp-thumb" data-v="down" title="Wrong or weak">👎</button>'
+    + '<input class="cp-note" style="display:none" maxlength="500"><button class="cp-note-send" style="display:none">Save</button><span class="cp-thumb-status"></span>';
+  const note = container.querySelector('.cp-note'), sendBtn = container.querySelector('.cp-note-send'), status = container.querySelector('.cp-thumb-status');
+  let vote = '';
+  const save = () => {
+    status.textContent = 'Saving…';
     fetch('/api/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + authToken },
-      body: JSON.stringify({ question, answer, vote, note, sources, user: currentUser(), type: meta.type || '', industry: meta.industry || '', confidence: meta.confidence || '' }),
-    }).then(r => { status.textContent = r.ok ? 'Thanks — saved' : 'Save failed'; })
+      body: JSON.stringify({ question, answer, vote, note: note.value.trim(), sources, user: currentUser(), type: meta.type || '', industry: meta.industry || '', confidence: meta.confidence || '' }),
+    }).then(r => { status.textContent = r.ok ? 'Saved. Thank you.' : 'Save failed'; if (r.ok) { note.style.display = 'none'; sendBtn.style.display = 'none'; } })
       .catch(() => { status.textContent = 'Save failed'; });
+  };
+  container.querySelectorAll('.cp-thumb').forEach(btn => btn.addEventListener('click', () => {
+    vote = btn.dataset.v;
+    container.querySelectorAll('.cp-thumb').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    note.placeholder = vote === 'up' ? 'What made it useful? (optional, Enter to save)' : 'What was wrong or missing? This is how it gets fixed.';
+    note.style.display = ''; sendBtn.style.display = ''; status.textContent = ''; note.focus();
+    if (vote === 'up') save(); // a thumbs-up is saved straight away; the note is a bonus
   }));
+  sendBtn.addEventListener('click', save);
+  note.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+}
+
+function cpRenderFacts(el, facts) {
+  if (!facts || !facts.length) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.innerHTML = facts.map(f => '<div class="cp-fact"><div class="l">' + escHtml(f.label) + '</div><div class="v">' + escHtml(f.value) + '</div>' + (f.sub ? '<div class="s">' + escHtml(f.sub) + '</div>' : '') + '</div>').join('');
 }
 
 async function askCopilot(question) {
@@ -1789,47 +1858,114 @@ async function askCopilot(question) {
   document.getElementById('cp-send').disabled = true;
   document.getElementById('btn-ask-bot').disabled = true;
   cpAddUser(q);
-  document.getElementById('cp-input').value = '';
+  const inp = document.getElementById('cp-input'); inp.value = ''; inp.style.height = 'auto';
 
   const wrap = document.createElement('div'); wrap.className = 'cp-msg-bot';
-  wrap.innerHTML = '<div class="cp-grounded"><h4>Say on the call</h4><div class="cp-grounded-body"><span class="cp-thinking">Thinking…</span></div></div>'
-    + '<div class="cp-opinion" style="display:none"><h4>Your read <span class="cp-conf"></span></h4><div class="cp-opinion-body"></div></div>'
+  wrap.innerHTML = '<div class="cp-facts" style="display:none"></div>'
+    + '<div class="cp-say"><div class="cp-h"><span class="cp-say-title">Say this</span><span class="cp-ev" style="display:none"></span><button class="cp-copy cp-copy-say" style="display:none">Copy</button></div><div class="cp-say-body"><span class="cp-thinking">Checking the tracker…</span></div></div>'
+    + '<div class="cp-two" style="display:none"><div class="cp-box cp-proof"><div class="cp-h">Proof, if they ask</div><div class="cp-proof-body"></div></div>'
+    + '<div class="cp-box cp-ask"><div class="cp-h">Ask next<button class="cp-copy cp-copy-ask">Copy</button></div><div class="cp-askbox"></div></div></div>'
+    + '<div class="cp-opinion" style="display:none"><h4>For you only, not for the client <span class="cp-conf"></span></h4><div class="cp-opinion-body"></div></div>'
     + '<div class="cp-actions" style="display:none"></div><div class="cp-sources"></div>';
   document.getElementById('cp-messages').appendChild(wrap); cpScroll();
-  const gBody = wrap.querySelector('.cp-grounded-body'), oBox = wrap.querySelector('.cp-opinion'),
-        oBody = wrap.querySelector('.cp-opinion-body'), confEl = wrap.querySelector('.cp-conf'),
-        srcEl = wrap.querySelector('.cp-sources'), actions = wrap.querySelector('.cp-actions');
+  const $ = (sel) => wrap.querySelector(sel);
+  const factsEl = $('.cp-facts'), sayBox = $('.cp-say'), sayBody = $('.cp-say-body'), sayTitle = $('.cp-say-title'), evEl = $('.cp-ev'),
+        two = $('.cp-two'), proofBox = $('.cp-proof'), proofBody = $('.cp-proof-body'), askBox = $('.cp-ask'), askBody = $('.cp-askbox'),
+        oBox = $('.cp-opinion'), oBody = $('.cp-opinion-body'), confEl = $('.cp-conf'), srcEl = $('.cp-sources'), actions = $('.cp-actions');
 
-  try {
-    const res = await fetch('/api/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + authToken },
-      body: JSON.stringify({ question: q, history: cpHistory, user: currentUser() }),
-    });
-    if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + res.status)); }
-    const data = await res.json();
-    gBody.innerHTML = mdLite(data.grounded || 'No answer.');
-    if (data.opinion && data.opinion.trim()) { oBox.style.display = ''; oBody.innerHTML = mdLite(data.opinion); }
-    const conf = (data.confidence || 'medium');
-    confEl.textContent = conf; confEl.className = 'cp-conf ' + conf;
+  const applyMeta = (d) => {
+    if (d.facts) cpRenderFacts(factsEl, d.facts);
+    if (d.mode === 'internal') { sayBox.classList.add('internal'); sayTitle.textContent = 'Answer, for you'; proofBox.querySelector('.cp-h').firstChild.textContent = 'Behind it'; }
+    if (d.evidence && d.mode !== 'internal') { evEl.style.display = ''; evEl.className = 'cp-ev ' + d.evidence; evEl.textContent = EV_LABEL[d.evidence] || d.evidence; }
+  };
+  const paint = (sec, live) => {
+    if (sec.say) { sayBody.innerHTML = mdLite(sec.say); sayBody.classList.toggle('cp-cursor', !!live && !sec.proof); }
+    if (sec.proof || sec.ask) two.style.display = '';
+    if (sec.proof) proofBody.innerHTML = proofHtml(sec.proof);
+    proofBox.style.display = sec.proof ? '' : 'none';
+    if (sec.ask) askBody.innerHTML = mdLite(sec.ask);
+    askBox.style.display = sec.ask ? '' : 'none';
+    if (sec.read) { oBox.style.display = ''; oBody.innerHTML = mdLite(sec.read); }
+  };
+  const finish = (data) => {
+    applyMeta(data);
+    paint({ say: data.grounded || 'No answer.', proof: data.proof || '', ask: data.ask || '', read: data.opinion || '' }, false);
+    sayBody.classList.remove('cp-cursor');
+    const conf = data.confidence || 'medium';
+    confEl.textContent = conf + ' confidence'; confEl.className = 'cp-conf ' + conf; oBox.style.display = '';
+    if (!data.opinion) oBody.innerHTML = '';
     const srcs = data.sources || '';
-    srcEl.textContent = srcs ? ('Sources: ' + srcs) : '';
+    srcEl.textContent = (srcs ? 'Sources: ' + srcs : '') + (data.ms ? (srcs ? '  ·  ' : '') + (data.ms / 1000).toFixed(1) + 's' : '');
+    const sayBtn = $('.cp-copy-say'); sayBtn.style.display = ''; sayBtn.onclick = () => cpCopy(sayBtn, plainText(data.grounded));
+    const askBtn = $('.cp-copy-ask'); askBtn.onclick = () => cpCopy(askBtn, plainText(data.ask));
     actions.style.display = '';
-    buildThumbs(actions, q, (data.grounded || '') + (data.opinion ? '\n\n[READ] ' + data.opinion : ''), srcs, { type: data.type, industry: data.industry, confidence: conf });
+    const full = (data.grounded || '') + (data.proof ? '\n\n[PROOF] ' + data.proof : '') + (data.ask ? '\n\n[ASK] ' + data.ask : '') + (data.opinion ? '\n\n[READ] ' + data.opinion : '');
+    buildThumbs(actions, q, full, srcs, { type: data.type, industry: data.industry, confidence: conf });
     cpHistory.push({ role: 'user', content: q });
     cpHistory.push({ role: 'assistant', content: data.grounded || '' });
     if (cpHistory.length > 16) cpHistory = cpHistory.slice(-16);
     loadRecent();
+  };
+
+  const headers = { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + authToken };
+  const payload = { question: q, history: cpHistory, user: currentUser() };
+  try {
+    let data = null, streamed = false;
+    try { // streaming first: fact cards show at once and the answer types itself out
+      const res = await fetch('/api/ask', { method: 'POST', headers, body: JSON.stringify(Object.assign({ stream: true }, payload)) });
+      if (res.status === 401) throw Object.assign(new Error('Session expired. Sign in again.'), { fatal: true });
+      const ctype = res.headers.get('content-type') || '';
+      if (res.ok && ctype.includes('text/event-stream') && res.body) {
+        streamed = true;
+        const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '', raw = '';
+        for (;;) {
+          const { value, done } = await reader.read(); if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const block = buf.slice(0, i); buf = buf.slice(i + 2);
+            const ev = (block.match(/^event: (.+)$/m) || [])[1]; const dl = (block.match(/^data: (.+)$/m) || [])[1];
+            if (!ev || !dl) continue;
+            let d; try { d = JSON.parse(dl); } catch { continue; }
+            if (ev === 'meta') applyMeta(d);
+            else if (ev === 'delta') { raw += d.text; paint(cpSplit(raw), true); cpScroll(); }
+            else if (ev === 'done') data = d;
+            else if (ev === 'error') throw Object.assign(new Error(d.error || 'Copilot failed'), { fatal: true });
+          }
+        }
+        if (!data) throw new Error('The answer was cut off');
+      } else if (res.ok) { data = await res.json(); }
+      else { const j = await res.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + res.status)); }
+    } catch (e1) {
+      if (e1.fatal) throw e1;
+      // one plain retry without streaming (covers proxies that buffer or drop event streams)
+      sayBody.innerHTML = '<span class="cp-thinking">' + (streamed ? 'Connection dropped, retrying…' : 'Thinking…') + '</span>';
+      const res2 = await fetch('/api/ask', { method: 'POST', headers, body: JSON.stringify(payload) });
+      if (!res2.ok) { const j = await res2.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + res2.status)); }
+      data = await res2.json();
+    }
+    finish(data);
   } catch (err) {
     wrap.innerHTML = '<div class="cp-error">Copilot error: ' + escHtml(err.message || 'unknown') + '</div>';
-    cpScroll();
   } finally {
+    cpScroll();
     cpBusy = false;
     document.getElementById('cp-send').disabled = false;
     document.getElementById('btn-ask-bot').disabled = false;
     document.getElementById('cp-input').focus();
   }
 }
+
+// Re-read the Google Sheet on demand (after editing Sources / Playbook / Coaching / Aliases).
+document.getElementById('cp-reload').addEventListener('click', async function () {
+  const btn = this, label = btn.textContent; btn.disabled = true; btn.textContent = 'Reloading…';
+  try {
+    const r = await fetch('/api/copilot/refresh', { method: 'POST', headers: { 'Authorization': 'Basic ' + authToken } });
+    const j = await r.json().catch(() => ({}));
+    btn.textContent = r.ok ? ('Loaded ' + ((j.health && j.health.joinees) || '') + ' joinees') : 'Reload failed';
+  } catch { btn.textContent = 'Reload failed'; }
+  setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2200);
+});
 
 // Copilot input handlers
 document.getElementById('cp-send').addEventListener('click', () => askCopilot(document.getElementById('cp-input').value));
@@ -1847,12 +1983,13 @@ document.getElementById('cp-refresh').addEventListener('click', () => {
   document.getElementById('cp-messages').innerHTML = `
     <div class="cp-empty" id="cp-empty">
       <div class="cp-empty-icon">◇</div>
-      <p>Ask a question to get grounded talking points for a BD call.</p>
+      <p>Ask a question. Type a client name, even half of it, and the Copilot will find it.</p>
       <div class="cp-examples">
         <button class="cp-chip">What have we done for EY GDS?</button>
-        <button class="cp-chip">Who else in BFSI can I name-drop?</button>
-        <button class="cp-chip">Client says they have a strong internal team — what do I say?</button>
-        <button class="cp-chip">Our track record in aviation</button>
+        <button class="cp-chip">Java hires in BFSI, and what experience range?</button>
+        <button class="cp-chip">Client says they have a strong internal team. What do I say?</button>
+        <button class="cp-chip">I'm talking to a solar company, what can I say?</button>
+        <button class="cp-chip">How many roles did we close in the last 6 months, by client?</button>
       </div>
     </div>`;
   document.querySelectorAll('#cp-messages .cp-chip').forEach(chip => chip.addEventListener('click', () => askCopilot(chip.textContent)));

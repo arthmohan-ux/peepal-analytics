@@ -15,3 +15,9 @@ services:
         sync: false
       - key: SITE_PASSWORD
         sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: gemini-3.8-flash
+      - key: LLM_REASONING_EFFORT
+        value: low
