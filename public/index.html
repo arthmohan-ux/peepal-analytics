@@ -256,6 +256,7 @@
 
     /* ── COPILOT ── */
     body.cp-mode { overflow: hidden; }
+    body.cp-mode.cp-short { overflow: auto; } /* very short windows: let the page scroll instead of cutting the panel off */
     .cp-layout { display: flex; gap: 20px; align-items: stretch; height: calc(100vh - 235px); min-height: 380px; }
     .cp-sidebar { width: 260px; flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; overflow-y: auto; }
     .cp-sidebar.collapsed { display: none; }
@@ -799,12 +800,25 @@ document.getElementById('btn-search-db').addEventListener('click', () => {
   document.getElementById('analytics-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
+// Size the Copilot panel to the space actually left in the window (the header and the
+// description above it vary in height), leaving a gap at the bottom.
+function cpFit() {
+  const el = document.querySelector('#tab-copilot .cp-layout');
+  if (!el || !document.body.classList.contains('cp-mode')) return;
+  window.scrollTo(0, 0);
+  const avail = Math.floor(window.innerHeight - el.getBoundingClientRect().top - 28);
+  document.body.classList.toggle('cp-short', avail < 360);
+  el.style.height = Math.max(360, avail) + 'px';
+}
+window.addEventListener('resize', cpFit);
+
 // Programmatic tab switch (mirrors the tab click handler)
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   document.body.classList.toggle('cp-mode', name === 'copilot');
+  if (name === 'copilot') cpFit();
   if (name === 'visual') renderVisual();
 }
 
@@ -823,6 +837,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     tab.classList.add('active');
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
     document.body.classList.toggle('cp-mode', tab.dataset.tab === 'copilot');
+    if (tab.dataset.tab === 'copilot') cpFit();
     if (tab.dataset.tab === 'visual') renderVisual();
   });
 });
