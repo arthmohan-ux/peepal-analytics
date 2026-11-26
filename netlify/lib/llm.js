@@ -84,14 +84,35 @@ const isEffortReject = (e) => e.status === 400 && /reasoning|effort|thinking|unk
 // ── one streaming attempt against one model ──────────────────────────────────
 // Resolves { text } when the stream ends. Calls hooks.first() on the first content
 // chunk; if that returns false the attempt cancels itself (another model won).
-async function attempt(model, messages, { temperature, maxTokens }, ctl, hooks) {
+// Tool-call deltas arrive in pieces keyed by index (or only by id on some providers).
+// Merge them, concatenating argument fragments and keeping any provider extras such as
+// Gemini's thought signature, which must be echoed back unchanged on the next turn.
+function mergeToolCalls(acc, deltas) {
+  deltas.forEach((d, pos) => {
+    let key = d.index != null ? 'i' + d.index : d.id ? 'id' + d.id : 'p' + acc.order.length + '_' + pos;
+    if (d.index == null && !d.id && acc.order.length) key = acc.order[acc.order.length - 1]; // continuation chunk
+    let tc = acc.map.get(key);
+    if (!tc) { tc = { id: '', type: 'function', function: { name: '', arguments: '' } }; acc.map.set(key, tc); acc.order.push(key); }
+    if (d.id) tc.id = d.id;
+    if (d.type) tc.type = d.type;
+    if (d.function) {
+      if (d.function.name) tc.function.name += tc.function.name && tc.function.name === d.function.name ? '' : d.function.name;
+      if (d.function.arguments) tc.function.arguments += typeof d.function.arguments === 'string' ? d.function.arguments : JSON.stringify(d.function.arguments);
+    }
+    for (const [k, v] of Object.entries(d)) if (!['index', 'id', 'type', 'function'].includes(k)) tc[k] = v;
+  });
+}
+
+async function attempt(model, messages, { temperature, maxTokens, tools, toolChoice }, ctl, hooks) {
   const body = { model, messages, temperature, max_tokens: maxTokens, stream: true };
+  if (tools && tools.length) { body.tools = tools; if (toolChoice) body.tool_choice = toolChoice; }
   const effort = currentEffort(model);
   if (effort !== 'off') body.reasoning_effort = effort;
 
   let timer = setTimeout(() => ctl.abort(new Error(`no answer from ${model} within ${FIRST_TOKEN_MS / 1000}s`)), FIRST_TOKEN_MS);
   let full = '';
   let started = false;
+  const calls = { map: new Map(), order: [] };
   try {
     const res = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -106,7 +127,7 @@ async function attempt(model, messages, { temperature, maxTokens }, ctl, hooks) 
       if (isEffortReject(err) && body.reasoning_effort) {
         clearTimeout(timer);
         stepEffort(model);
-        return attempt(model, messages, { temperature, maxTokens }, ctl, hooks);
+        return attempt(model, messages, { temperature, maxTokens, tools, toolChoice }, ctl, hooks);
       }
       throw err;
     }
@@ -124,24 +145,28 @@ async function attempt(model, messages, { temperature, maxTokens }, ctl, hooks) 
         if (!line.startsWith('data:')) continue;
         const payload = line.slice(5).trim();
         if (payload === '[DONE]') continue;
-        let delta = '';
+        let delta = '', tcs = null;
         try {
           const j = JSON.parse(payload);
-          delta = (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || '';
+          const dl = (j.choices && j.choices[0] && j.choices[0].delta) || {};
+          delta = typeof dl.content === 'string' ? dl.content : '';
+          if (Array.isArray(dl.tool_calls) && dl.tool_calls.length) tcs = dl.tool_calls;
         } catch (_) { continue; } // keep-alive or partial line
-        if (!delta) continue;
+        if (!delta && !tcs) continue;
         if (!started) {
           started = true;
-          if (!hooks.first()) { ctl.abort(); return { text: '' }; }
+          if (!hooks.first()) { ctl.abort(); return { text: '', toolCalls: [] }; }
         }
         clearTimeout(timer);
         timer = setTimeout(() => ctl.abort(new Error(`${model} stalled mid-answer`)), IDLE_MS);
-        full += delta;
-        hooks.delta(delta);
+        if (tcs) mergeToolCalls(calls, tcs);
+        if (delta) { full += delta; hooks.delta(delta); }
       }
     }
-    if (!full.trim()) { const e = new Error(`${model} returned no text`); e.status = 503; throw e; }
-    return { text: full };
+    const toolCalls = calls.order.map((k) => calls.map.get(k)).filter((tc) => tc.function.name);
+    toolCalls.forEach((tc, i) => { if (!tc.id) tc.id = 'call_' + Date.now().toString(36) + '_' + i; });
+    if (!full.trim() && !toolCalls.length) { const e = new Error(`${model} returned no text`); e.status = 503; throw e; }
+    return { text: full, toolCalls };
   } catch (e) {
     const err = ctl.signal.aborted && ctl.signal.reason instanceof Error ? ctl.signal.reason : e;
     if (started) err.partial = full;
@@ -156,9 +181,11 @@ async function attempt(model, messages, { temperature, maxTokens }, ctl, hooks) 
 // merely slow, start the next one after HEDGE_MS without cancelling the first.
 // The first model to produce text wins and every other attempt is cancelled.
 // Returns { text, model, tried } where tried lists models that lost or failed.
-function streamChat(messages, { temperature = 0.2, maxTokens = 1500 } = {}, onDelta = () => {}) {
+// opts.tools / opts.toolChoice enable function calling; the result then carries toolCalls.
+// opts.models restricts the chain (e.g. to keep one model for a whole tool conversation).
+function streamChat(messages, { temperature = 0.2, maxTokens = 1500, tools, toolChoice, models: only } = {}, onDelta = () => {}) {
   if (!API_KEY) return Promise.reject(new Error('LLM_API_KEY is not set'));
-  const models = orderedModels();
+  const models = only && only.length ? orderedModels().filter((m) => only.includes(m)).concat(only.filter((m) => !candidateModels().includes(m))) : orderedModels();
   const t0 = Date.now();
 
   return new Promise((resolve, reject) => {
@@ -192,7 +219,7 @@ function streamChat(messages, { temperature = 0.2, maxTokens = 1500 } = {}, onDe
       started.set(model, Date.now());
       hedge = setTimeout(launch, HEDGE_MS);
 
-      attempt(model, messages, { temperature, maxTokens }, ctl, {
+      attempt(model, messages, { temperature, maxTokens, tools, toolChoice }, ctl, {
         first: () => {
           if (winner) return false;
           winner = model;
@@ -210,9 +237,9 @@ function streamChat(messages, { temperature = 0.2, maxTokens = 1500 } = {}, onDe
           return true;
         },
         delta: (d) => { if (winner === model) onDelta(d); },
-      }).then(({ text }) => {
+      }).then(({ text, toolCalls }) => {
         live.delete(model);
-        if (winner === model) end(resolve, { text, model, tried, firstTokenModel: model, ms: Date.now() - t0 });
+        if (winner === model) end(resolve, { text, toolCalls: toolCalls || [], model, tried, firstTokenModel: model, ms: Date.now() - t0 });
         else if (!winner && live.size === 0 && next >= models.length) end(reject, lastErr || new Error('No model answered'));
       }).catch((e) => {
         live.delete(model);

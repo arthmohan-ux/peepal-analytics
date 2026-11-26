@@ -2,46 +2,52 @@
 
 ## 1. How an answer is built
 
-1. **Read the sheet.** `netlify/lib/kb.js` loads Joinees All, Offer Drop All, Client Last Engagement, the 11 Clients tabs, and the knowledge tabs (Sources, Doctrine, Playbook, plus the optional Coaching and Aliases). It is cached for 30 minutes.
-2. **Work out what the question is about.** Clients (exact, alias, half-typed, misspelt), industries (direct or adjacent), skills, date ranges, city, seniority.
-3. **Compute the exact answer in code.** The row filter runs for precisely the combination asked ("Java + BFSI", "Wipro + Hyderabad + FY25-26"). The model never counts.
-4. **Rate the evidence.** Direct, adjacent or absent. This sets the confidence badge. The model can lower it, never raise it.
-5. **Pick the technique.** The few Playbook and Doctrine rows that match the question, not the whole tab.
-6. **Ask the model to phrase it.** Output is five parts: Say this, Proof, Ask next, For you only, and metadata.
-7. **Log it.** QueryLog now also records Evidence, Matched (what retrieval resolved), LatencyMs and Model.
+1. **Load the sheet.** `netlify/lib/data.js` reads Joinees All, Offer Drop All, Client Last Engagement, the 11 Clients tabs and the knowledge tabs (Sources, Doctrine, Playbook, plus the optional Coaching and Aliases) in one request. Columns are found **by header name**, so adding or moving a column does not break anything. Client names and city spellings are merged ("Bengaluru", "bangalore" → Bangalore).
+2. **Give the model the map.** The model gets the table layout, every client in the tracker with its industry and activity, the values that exist (industries, HQs, cities), today's date and how far the data runs.
+3. **The model asks, the code counts.** The model calls `query_tracker` (filter, group, count, sum, average, rank, list rows) and `search_knowledge` (Playbook, Doctrine, Sources, Clients tabs) as many times as the question needs. `netlify/lib/query.js` does every calculation, so numbers are exact. The model never counts.
+4. **It picks one of two answer modes.**
+   - **Data mode** (the default): an answer for the rep. Numbers, lists, tables, comparisons, revenue. Shown as *Answer, for you* plus *How it was counted*.
+   - **Call mode**: words for a client. *Say this*, *Proof*, *Ask next*, and *For you only*. Used for objections, pitches and "what do I say".
+5. **Log it.** QueryLog records the question, confidence, evidence, the queries that ran (Matched column), latency and model.
 
-The rule to remember: *if an answer is wrong, the fix is almost never the prompt.* It is the data, a missing row in a knowledge tab, or an alias.
+Under every answer the UI shows the queries that ran and **"Tracker data to [date]"**, so a stale or empty answer is visible at a glance.
 
-## 2. The weekly loop (20 minutes)
+The rule to remember: *if an answer is wrong, look at the queries it ran first* (shown under the answer, and in QueryLog). A wrong filter is a prompt or alias fix; a wrong number from a right filter is a data fix.
+
+## 2. Keeping the data fresh
+
+- The Render server re-reads the sheet in the background every **5 minutes** (`TRACKER_REFRESH_MS`).
+- Any question that finds data older than **10 minutes** (`TRACKER_MAX_AGE_MS`) re-reads the sheet before answering. This covers the Netlify functions and a server that just woke up.
+- **Reload data** in the Copilot header re-reads immediately.
+- If a reload fails, the Copilot keeps the last good copy, the answer says the data may be out of date, and `/api/copilot/health` shows the error under `data.lastError`. Nothing fails silently any more.
+
+## 3. The weekly loop (20 minutes)
 
 Open `https://peepal-analytics.onrender.com/api/copilot/gaps?days=7` while signed in. It returns:
 
-- `weakQuestions`: every question answered with low confidence or no evidence
+- `weakQuestions`: every question answered with low confidence or no evidence, with the queries it ran
 - `namesNotInData`: company names reps asked about that the tracker does not have
 - `byType`: which kinds of question fail most
 - `medianLatencyMs`: speed
 
 Then open the Feedback tab and read every thumbs-down note.
 
-For each weak question, find the row in this table and make that fix.
-
 | What went wrong | Fix | Where |
 |---|---|---|
 | A client was not recognised ("KPMG Global Services", "JPMC") | Add an alias row | Aliases tab |
 | A real client shows as "not in the data" | The name in the tracker differs. Add an alias, or fix the tracker name | Aliases tab or Joinees All |
-| A space is asked about that Peepal has not worked in ("solar", "legal") | Add an adjacent-industry alias so it bridges to the nearest proof | Aliases tab |
-| A skill word finds nothing ("SRE", "RPA") | Add a skill alias listing the words the tracker uses | Aliases tab |
+| A skill search missed obvious rows ("SRE", "RPA") | Add a skill alias listing the words the tracker uses | Aliases tab |
 | The number is right but the line is weak or off-message | Write the approved line once | Coaching tab |
 | An objection got a generic answer | Add a Playbook row tagged `objection` | Playbook tab |
 | Reps keep asking for a story that does not exist | Write the case study | Sources tab |
 | A count looks low or a client is missing from an industry | The tracker row is blank or mislabelled | Joinees All |
 | The answer contradicts something the BD lead knows | Coaching row now, data fix after | Coaching tab |
 
-After editing any tab, click **Reload data** in the Copilot header. No deploy needed.
+After editing any tab, click **Reload data** (or wait up to 5 minutes). No deploy needed.
 
-## 3. The two new tabs
+## 4. The two optional tabs
 
-Create these tabs in the same Google Sheet. Header row exactly as shown. Both are optional: the Copilot runs without them.
+Create these tabs in the same Google Sheet with the header row exactly as shown. The Copilot runs without them.
 
 ### Aliases
 
@@ -54,10 +60,8 @@ Create these tabs in the same Google Sheet. Header row exactly as shown. Both ar
 | sre | sre, site reliability, devops | skill | |
 | rpa | rpa, uipath, automation anywhere, blue prism | skill | |
 
-- `kind` is `company`, `industry` or `skill`.
-- For a company, `maps_to` is the client name exactly as it appears in Joinees All.
-- For an industry, `maps_to` is the tracker's industry label (BFSI, Manufacturing, IT Prod). `relation` is `direct` when the word means that industry and `adjacent` when it is only the nearest neighbour. Adjacent makes the Copilot say honestly that it is the closest proof.
-- For a skill, `maps_to` is a comma list of words to search in designation and business unit.
+- `company` aliases are applied by the query engine itself: a filter on "jpmc" returns Jp Morgan rows. `maps_to` must be the client name as it appears in Joinees All.
+- `industry` and `skill` aliases are given to the model as instructions ("when a rep says X, search for Y"). `relation: adjacent` makes it say honestly that the proof is the closest neighbour, not the exact space.
 
 ### Coaching
 
@@ -66,40 +70,33 @@ Create these tabs in the same Google Sheet. Header row exactly as shown. Both ar
 | C-001 | too expensive, pricing is high, fee is high | Never discount on the call. Ask what they compare against first. Then anchor on the 90-day replacement and time-to-fill. | I hear you on cost. Can I ask what you are comparing us against? | general | yes |
 | C-002 | bot model, build operate transfer | Disqualify until transfer. Do not pitch RPO. Offer to stay in touch. | | internal | yes |
 
-- `triggers` is a comma list of phrases. If any appears in the question, the row is used.
-- `guidance` is the instruction to the Copilot. It outranks everything else.
+- `triggers` is a comma list of phrases. If any appears in the question, the row is used and outranks everything else.
 - `say_line` is optional. If present the Copilot uses it as the line to say.
 - Set `active` to `no` to switch a row off without deleting it.
 
-This is the fastest way to correct the Copilot. One row, one click on Reload data.
+## 5. Writing knowledge rows that get found
 
-## 4. Writing knowledge rows that get picked
+`search_knowledge` ranks rows by word overlap with what the model searches for, with the title, tags and category counting most.
 
-Rows are ranked by word overlap with the question, so wording matters.
+- **Playbook objections:** put the objection in the `item` column in the client's own words ("We already have vendors"). Tag it `objection`. Put the words to say in `action`.
+- **Sources:** `bd_usage` and `tags` decide when a story is pulled. Write `bd_usage` as "Use when the prospect says or is ...". Fill `result_client_safe` or the story is treated as a technique, never as a Peepal win. `result_internal` never reaches a client line.
+- **Doctrine:** set `audience` to `internal` for anything a client must never hear.
+- Give every row an `id`. Ids show up in the sources line under each answer.
 
-- **Playbook objections:** put the objection in the `item` column in the client's own words ("We already have vendors"). Tag it `objection`. Put the actual words to say in `action`.
-- **Sources:** `bd_usage` and `tags` decide when a story is pulled. Write `bd_usage` as "Use when the prospect says or is ...". Fill `result_client_safe` or the story is treated as a technique, never as a Peepal win.
-- **Doctrine:** set `audience` to `internal` for anything a client must never hear. Internal rows only ever appear in "For you only".
-- Give every row an `id`. Ids show up in Sources under each answer, so you can see which row drove it.
+## 6. Tracker fixes that raise accuracy now
 
-The biggest content gap today: Sources has 8 real proof points for 261 clients. Every new client-safe case study directly raises answer quality. Start with Wipro, Citi, Goldman Sachs, KGS and Swiss Re, the largest clients with no story.
+Ordered by impact. Current counts are in `/api/copilot/health`.
 
-## 5. Tracker fixes that raise accuracy now
+1. **Function/Business Unit is blank on about half of all joinees** (2,778 of 5,450 in the 26 Nov copy). Skill answers ("how many Guidewire", "AI hires") can only find rows where the skill is written in Designation or Function, so they are floors. Filling Function for EY GDS fixes most of it.
+2. **Years of experience is blank on about a quarter of joinees** and joining location on about a fifth. Seniority and city answers say so, but they are partial.
+3. **Client Last Engagement is mostly empty.** 1,011 of 1,285 rows have no client name and Engagement Model is blank on every row, so "which clients are RPO" cannot be answered. New and dormant clients are worked out from joinee dates instead.
+4. **22 clients with joinees have no industry** (Industry says CHECK or is blank): Forvis Mazars, Aon Consulting, Fractal Analytics, Wattpower Systems and others. They are missing from every industry answer. `clientsWithoutIndustrySample` in health lists them.
+5. **FIS vs Fiserv:** the Offer Drop normalizer maps "fis" to Fiserv, so Fiserv shows 27 offer drops and 0 joinees. They are different companies.
+6. **Industry labels:** FMCG (100) and Retail (38) are separate labels, as are IT Services and IT Prod. Merge them in the sheet if they should be one.
 
-Ordered by impact.
+## 7. The normalizer scripts (.gs) point at the wrong columns
 
-1. **Citi has no industry or HQ.** All 247 Citi rows in Joinees All say `CHECK`. Citi is therefore missing from every BFSI answer. Set Industry to BFSI and HQ to USA.
-2. **85 clients have no industry**, 10 of them with joinees (AppViewX, Expedia, Analytical Wizard and others). `/api/copilot/health` lists them.
-3. **Business unit is blank on 52% of joinees.** 1,106 rows have only a grade title ("Senior Consultant 1", "Manager"), so they cannot be counted as tech or non-tech, or found by skill. Filling this for EY GDS alone fixes most of it.
-4. **Designation is blank on 45% of offer drops.** Drop analysis by role is half blind.
-5. **Client Last Engagement:** the Engagement Model column is empty on every row, so "which clients are RPO" cannot be answered. 1,028 rows have dates but no client name.
-6. **Offer Drop client names:** 77 do not match a Joinees client. Some are notes, not clients ("Final Select- NO JR yet", "Chaitra/Beena").
-7. **TVH** is tagged Manufacturing on 68 rows and "Manufacturing & Engineering" on 1.
-8. **FIS vs Fiserv:** the client normalizer maps "fis" to Fiserv. They are different companies and FIS has 36 joinees.
-
-## 6. The normalizer scripts (.gs) point at the wrong columns
-
-The four Apps Script normalizers use fixed column numbers from an older sheet layout.
+The four Apps Script normalizers use fixed column numbers from an older sheet layout. Do not run them until they find columns by header.
 
 | Script | Writes to | That column is now | Should be |
 |---|---|---|---|
@@ -108,9 +105,9 @@ The four Apps Script normalizers use fixed column numbers from an older sheet la
 | `normalizeOfferDropAllClientFinal` | Offer Drop E (5) | FY | G (7) |
 | `normalizeOfferDropAllRolesGranular` | Offer Drop H (8) | HQ Location | I (9) |
 
-*Do not run the business unit one as it stands.* Its remove-list contains "Manager", "Consultant", "Senior", "Staff" and "Associate", so pointed at the Designation column it would blank 348 designations.
+*The business unit one is the dangerous one.* Its remove-list contains "Manager", "Consultant", "Senior", "Staff" and "Associate", so pointed at Designation it would blank hundreds of titles.
 
-Make them find the column by header so this cannot happen again. Add this helper once:
+Add this helper once and replace the four hard-coded numbers with it:
 
 ```javascript
 function colByHeader_(sheet, header) {
@@ -121,8 +118,6 @@ function colByHeader_(sheet, header) {
 }
 ```
 
-Then replace the four hard-coded numbers:
-
 ```javascript
 const targetCol = colByHeader_(sheet, 'Function/Role/Business Unit'); // was 12
 const targetCol = colByHeader_(sheet, 'Client Cleaned');              // was 5
@@ -130,66 +125,65 @@ const targetCol = colByHeader_(sheet, 'Designation');                 // was 8 (
 // in normalizeDesignations(): const col = colByHeader_(sheet, 'Designation'); and use col in place of 11
 ```
 
-## 7. Model settings
+The Copilot does not depend on these scripts: it merges client and city spellings itself when it loads the sheet.
+
+## 8. Settings
 
 Set in Render, Environment.
 
-| Variable | Value | Why |
+| Variable | Default | What it does |
 |---|---|---|
-| `LLM_API_KEY` | your key | unchanged |
-| `LLM_MODEL` | `gemini-3.8-flash` | Primary model. If it is slow or rate-limited, the chain below covers it. |
-| `LLM_REASONING_EFFORT` | `minimal` | Counting is done in code, so the model only phrases. If a model rejects `minimal`, the code steps up to `low` for that model by itself. |
-| `LLM_FALLBACK_MODELS` | optional | Defaults to 3.6 Flash, then 3.5 Flash-Lite, then 3.1 Flash-Lite. |
-| `LLM_HEDGE_MS` | optional, default `6000` | If the current model has not started writing by then, the next one starts alongside it. First to write wins. |
-| `LLM_FIRST_TOKEN_MS` | optional, default `12000` | A model silent this long is dropped for that question. |
-| `LLM_COOLDOWN_MS` | optional, default `300000` | A model that failed or lost a race by being silent is skipped for 5 minutes, so it costs one slow answer, not every answer. |
+| `LLM_API_KEY` | | Required |
+| `LLM_MODEL` | `gemini-3.8-flash` | Primary model. It must support function calling. |
+| `LLM_FALLBACK_MODELS` | 3.6 Flash, 3.5 Flash-Lite, 3.1 Flash-Lite | Tried in order if the primary fails or is slow |
+| `LLM_REASONING_EFFORT` | `minimal` | The model now plans queries, so if it picks wrong filters, try `low` before anything else |
+| `COPILOT_MAX_ROUNDS` | `6` | Most query rounds per answer. The last round must answer. |
+| `TRACKER_REFRESH_MS` | `300000` | Background reload interval (Render) |
+| `TRACKER_MAX_AGE_MS` | `600000` | Data older than this is reloaded before answering |
+| `LLM_HEDGE_MS`, `LLM_FIRST_TOKEN_MS`, `LLM_COOLDOWN_MS` | 6s, 12s, 5 min | Model racing and fallback, unchanged |
 
-### Why an answer is slow
+A typical answer is two model rounds: one to run the queries, one to write. If a model fails partway, the answer restarts once on the next model.
 
-Retrieval takes well under a second. Nearly all wait time is the model. Open `/api/copilot/health` and read `models`:
+Netlify functions time out after 10 seconds by default, which a multi-query answer can exceed. Render is the deployment to use for the Copilot.
 
-- `ok: true` on every model: the model is just slow. Lower `LLM_REASONING_EFFORT`, or move a Flash-Lite model to the front of the chain.
-- `coolingForSec` on the primary with a `429` in `lastError`: you are hitting the free-tier rate limit on that model. Put the model that keeps answering first in `LLM_MODEL`, or attach billing.
-- `coolingForSec` with "silent" or "no answer": the model is overloaded at Google's end. The chain is already covering it.
-
-Every streamed answer also carries `model` and, when something failed, `tried`, so you can see which model answered and what lost.
-
-Free tier or paid: the free tier works. The reason to attach billing is data use and rate limits, not quality. Prompts carry client names, closure counts and billing figures.
-
-To try another provider, change `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`. Any OpenAI-compatible endpoint works. Run the same ten questions on both and compare before switching.
-
-## 8. Debugging one answer
+## 9. Debugging one answer
 
 ```bash
 node scripts/copilot-debug.js "java hires in bfsi last year"
-node scripts/copilot-debug.js -v "diage"        # also prints the full context sent to the model
-node scripts/copilot-debug.js --golden          # 34 regression questions, pass or fail
 ```
 
-It needs the same env vars as the server. It does not call the model, so it is free and instant.
+Prints every query the model ran, the mode, confidence and the full answer.
 
-When you fix something, add the question to `scripts/golden.json` so it cannot silently break later. Run `--golden` before every deploy.
+```bash
+node scripts/copilot-debug.js --query '{"table":"joinees","filters":[{"field":"month","op":"eq","value":"2026-11"}],"group_by":["client"]}'
+```
 
-## 9. When code is the right fix
+Runs one query exactly as the model would. No model call, so it is free and instant. Use it to check a number by hand.
 
-Only for these, all in `netlify/lib/kb.js`:
+```bash
+node scripts/copilot-debug.js --golden
+```
 
-| Change | Constant |
+Runs the regression questions in `scripts/golden.json`. Number checks are recomputed from the live data each time, so they do not go stale. Run it before every deploy, and add any question you fix.
+
+All three need the same env vars as the server. To run without Google credentials, set `TRACKER_JSON` to a JSON dump of the tabs (`{"Joinees All": [[...header], [...row]], ...}`) with dates as sheet serial numbers.
+
+## 10. When code is the right fix
+
+| Change | Where |
 |---|---|
-| A word should not be searched as a skill | `STOPWORDS` or `GENERIC_SKILL` |
-| A client name collides with an ordinary word | `COMPANY_MATCH_SKIP` or `WEAK_FIRST_WORD` |
-| A synonym group for a skill family | `SKILL_GROUPS` |
-| How designations group into tech and non-tech | `FAMILIES` |
-| A new kind of question | `RE` and `classify()` |
+| A new column the model should be able to query | `HEADERS` in `netlify/lib/data.js` (header names it accepts) and `FIELDS` in `netlify/lib/query.js` (what the model is told) |
+| A header was renamed in the sheet | Add the new name to `HEADERS` in `data.js` |
+| A city spelling that should merge | `CITY_ALIAS` in `data.js` |
+| A built-in client nickname | `BUILTIN_ALIASES` in `query.js` (or, better, the Aliases tab) |
+| How the model should read a kind of question | `RULES` in `netlify/lib/copilot.js`. Change it last, and only for something wrong across many answers |
 
-The wording rules live in `SYSTEM` in `netlify/lib/copilot.js`. Change them last, and only for something that is wrong across many answers.
-
-## 10. Endpoints
+## 11. Endpoints
 
 | Endpoint | Use |
 |---|---|
-| `POST /api/ask` | `{question, history, user, stream}`. With `stream: true` it returns server-sent events. |
+| `POST /api/ask` | `{question, history, user, stream}`. With `stream: true` it returns server-sent events: `meta` (data freshness), `tool` (each query), `delta` (text), `done` (the answer). |
 | `POST /api/copilot/refresh` | Re-read the sheet now. Same as the Reload data button. |
-| `GET /api/copilot/health` | Row counts, latest dates, model in use, clients with no industry. |
+| `GET /api/copilot/health` | Data freshness and last reload error, row counts, latest dates, blank-field counts, clients with no industry, model status. |
 | `GET /api/copilot/gaps?days=30` | The weekly review. |
 | `GET /api/feedback` | All votes with a summary by type, industry and month. |

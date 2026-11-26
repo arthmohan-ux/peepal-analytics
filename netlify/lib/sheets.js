@@ -32,6 +32,30 @@ async function getSheetData(sheetName) {
   return res.data.values || [];
 }
 
+// Titles of every tab in the spreadsheet.
+async function listTabs() {
+  const sheets = await readClient();
+  const res = await sheets.spreadsheets.get({ spreadsheetId: process.env.SHEET_ID, fields: 'sheets.properties.title' });
+  return (res.data.sheets || []).map((s) => s.properties.title);
+}
+
+// Read many tabs in ONE request. Values come back unformatted: numbers as numbers and
+// dates as serial numbers, so nothing depends on how a cell happens to be displayed.
+// Returns { [tabName]: rows[][] }. Every name passed must exist (use listTabs first).
+async function batchGetTabs(names) {
+  if (!names.length) return {};
+  const sheets = await readClient();
+  const res = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId: process.env.SHEET_ID,
+    ranges: names.map((n) => `'${String(n).replace(/'/g, "''")}'`),
+    valueRenderOption: 'UNFORMATTED_VALUE',
+    dateTimeRenderOption: 'SERIAL_NUMBER',
+  });
+  const out = {};
+  (res.data.valueRanges || []).forEach((vr, i) => { out[names[i]] = vr.values || []; });
+  return out;
+}
+
 // Create the tab (with a header row) only if it doesn't already exist. Result is cached
 // so a log write does not fetch the whole spreadsheet's metadata every time.
 const _tabReady = {};
@@ -71,4 +95,4 @@ async function appendRows(sheetName, rows) {
   });
 }
 
-module.exports = { getSheetData, ensureTab, ensureHeaders, appendRows };
+module.exports = { getSheetData, listTabs, batchGetTabs, ensureTab, ensureHeaders, appendRows };
