@@ -335,6 +335,14 @@
     .cp-recent-chip:hover { border-color: var(--accent); }
     .cp-recent-chip { max-width: 440px; }
     .cp-recent-chip .q { display: block; white-space: normal; line-height: 1.35; }
+    .cp-table-wrap { overflow-x: auto; margin: 8px 0; }
+    .cp-table { border-collapse: collapse; font-size: 0.86rem; min-width: 60%; }
+    .cp-table th { text-align: left; font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-light); border-bottom: 1px solid var(--border-mid); padding: 6px 12px 6px 0; }
+    .cp-table td { border-bottom: 1px solid var(--border); padding: 5px 12px 5px 0; vertical-align: top; }
+    .cp-table td.n { text-align: right; font-variant-numeric: tabular-nums; }
+    .cp-status { font-size: 0.76rem; color: var(--text-light); margin-top: 6px; }
+    .cp-status div { margin: 2px 0; } .cp-status .err { color: #a53a3a; }
+    .cp-stale { color: #a53a3a; font-weight: 600; }
     .cp-thinking { color: var(--text-light); font-style: italic; animation: cpPulse 1.2s ease-in-out infinite; }
     @keyframes cpPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
     .cp-recent-tags { display: flex; gap: 5px; margin-top: 6px; }
@@ -653,7 +661,8 @@
               <div class="cp-empty-icon">◇</div>
               <p>Ask a question. Type a client name, even half of it, and the Copilot will find it.</p>
               <div class="cp-examples">
-                <button class="cp-chip">What have we done for EY GDS?</button>
+                <button class="cp-chip">How many joinees this month, by client?</button>
+        <button class="cp-chip">What have we done for EY GDS?</button>
                 <button class="cp-chip">Java hires in BFSI, and what experience range?</button>
                 <button class="cp-chip">Client says they have a strong internal team. What do I say?</button>
                 <button class="cp-chip">I'm talking to a solar company, what can I say?</button>
@@ -1762,12 +1771,27 @@ function mdLite(s) {
   html = html.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');           // italic: balanced single
   html = html.replace(/\*+/g, '');                                 // drop any stray/unbalanced asterisks
   const lines = html.split('\n');
-  let out = '', inList = false;
+  let out = '', inList = false, table = null;
+  const cells = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+  const flushTable = () => {
+    if (!table) return;
+    const [head, ...body] = table; const num = (c) => /^[₹\d,.\s%()+-]+$/.test(c) && /\d/.test(c);
+    out += '<div class="cp-table-wrap"><table class="cp-table"><thead><tr>' + head.map(c => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>'
+      + body.map(r => '<tr>' + head.map((_, i) => '<td' + (num(r[i] || '') ? ' class="n"' : '') + '>' + (r[i] || '') + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
+    table = null;
+  };
   lines.forEach(line => {
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      if (inList) { out += '</ul>'; inList = false; }
+      if (/^\s*\|[\s:|-]+\|\s*$/.test(line)) return; // the |---|---| divider
+      (table = table || []).push(cells(line)); return;
+    }
+    flushTable();
     const m = line.match(/^\s*[-*]\s+(.*)$/);
     if (m) { if (!inList) { out += '<ul>'; inList = true; } out += '<li>' + m[1] + '</li>'; }
     else { if (inList) { out += '</ul>'; inList = false; } if (line.trim()) out += '<p style="margin:4px 0;">' + line + '</p>'; }
   });
+  flushTable();
   if (inList) out += '</ul>';
   return out;
 }
@@ -1796,13 +1820,15 @@ function currentUser() {
 // Split the model's delimited text (complete or still streaming) into its sections.
 function cpSplit(t) {
   t = String(t || '');
-  const out = { say: '', proof: '', ask: '', read: '' };
-  const re = /\[\[(SAY|PROOF|ASK|READ|META)\]\]/gi; const marks = []; let m;
+  const out = { say: '', proof: '', ask: '', read: '', mode: '' };
+  const re = /\[\[(ANSWER|NOTES|SAY|PROOF|ASK|READ|META)\]\]/gi; const marks = []; let m;
   while ((m = re.exec(t))) marks.push({ key: m[1].toLowerCase(), i: m.index, end: m.index + m[0].length });
   if (!marks.length) { out.say = t.replace(/\[\[?[A-Z]*\]?\]?$/, ''); return out; }
+  const KEY = { answer: 'say', notes: 'read' };
   marks.forEach((mk, i) => {
-    const end = i + 1 < marks.length ? marks[i + 1].i : t.length;
-    if (mk.key in out && !out[mk.key]) out[mk.key] = t.slice(mk.end, end).replace(/\[\[?[A-Z]*\]?\]?$/, '').trim();
+    if (mk.key === 'answer') out.mode = 'internal'; else if (mk.key === 'say') out.mode = out.mode || 'client';
+    const k = KEY[mk.key] || mk.key; const end = i + 1 < marks.length ? marks[i + 1].i : t.length;
+    if (k in out && !out[k]) out[k] = t.slice(mk.end, end).replace(/\[\[?[A-Z]*\]?\]?$/, '').replace(/^[\s:*]+/, '').trim();
   });
   return out;
 }
@@ -1866,19 +1892,27 @@ async function askCopilot(question) {
     + '<div class="cp-two" style="display:none"><div class="cp-box cp-proof"><div class="cp-h">Proof, if they ask</div><div class="cp-proof-body"></div></div>'
     + '<div class="cp-box cp-ask"><div class="cp-h">Ask next<button class="cp-copy cp-copy-ask">Copy</button></div><div class="cp-askbox"></div></div></div>'
     + '<div class="cp-opinion" style="display:none"><h4>For you only, not for the client <span class="cp-conf"></span></h4><div class="cp-opinion-body"></div></div>'
-    + '<div class="cp-actions" style="display:none"></div><div class="cp-sources"></div>';
+    + '<div class="cp-actions" style="display:none"></div><div class="cp-sources"></div><div class="cp-status"></div>';
   document.getElementById('cp-messages').appendChild(wrap); cpScroll();
   const $ = (sel) => wrap.querySelector(sel);
   const factsEl = $('.cp-facts'), sayBox = $('.cp-say'), sayBody = $('.cp-say-body'), sayTitle = $('.cp-say-title'), evEl = $('.cp-ev'),
         two = $('.cp-two'), proofBox = $('.cp-proof'), proofBody = $('.cp-proof-body'), askBox = $('.cp-ask'), askBody = $('.cp-askbox'),
-        oBox = $('.cp-opinion'), oBody = $('.cp-opinion-body'), confEl = $('.cp-conf'), srcEl = $('.cp-sources'), actions = $('.cp-actions');
+        oBox = $('.cp-opinion'), oBody = $('.cp-opinion-body'), confEl = $('.cp-conf'), srcEl = $('.cp-sources'), actions = $('.cp-actions'), statusEl = $('.cp-status');
+  let dataAsOf = null; const queryLines = [];
+  const fmtDay = (iso) => { if (!iso) return '?'; const d = new Date(iso + 'T00:00:00'); return isNaN(d) ? iso : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); };
+  const asOfText = () => !dataAsOf ? '' : (dataAsOf.stale ? '<span class="cp-stale">Data may be out of date (last reload failed). </span>' : '') + 'Tracker data to ' + fmtDay(dataAsOf.latestJoinee);
+  const showStatus = (done) => {
+    statusEl.innerHTML = (queryLines.length ? '<div>' + (done ? 'Queries run: ' : 'Querying the tracker: ') + queryLines.map(escHtml).join(' · ') + '</div>' : '') + (dataAsOf ? '<div>' + asOfText() + '</div>' : '');
+  };
 
   const applyMeta = (d) => {
     if (d.facts) cpRenderFacts(factsEl, d.facts);
-    if (d.mode === 'internal') { sayBox.classList.add('internal'); sayTitle.textContent = 'Answer, for you'; proofBox.querySelector('.cp-h').firstChild.textContent = 'Behind it'; }
+    if (d.dataAsOf) { dataAsOf = d.dataAsOf; showStatus(false); }
+    if (d.mode === 'internal') { sayBox.classList.add('internal'); sayTitle.textContent = 'Answer, for you'; proofBox.querySelector('.cp-h').firstChild.textContent = 'Behind it'; oBox.querySelector('h4').firstChild.textContent = 'How it was counted '; }
     if (d.evidence && d.mode !== 'internal') { evEl.style.display = ''; evEl.className = 'cp-ev ' + d.evidence; evEl.textContent = EV_LABEL[d.evidence] || d.evidence; }
   };
   const paint = (sec, live) => {
+    if (sec.mode === 'internal') applyMeta({ mode: 'internal' });
     if (sec.say) { sayBody.innerHTML = mdLite(sec.say); sayBody.classList.toggle('cp-cursor', !!live && !sec.proof); }
     if (sec.proof || sec.ask) two.style.display = '';
     if (sec.proof) proofBody.innerHTML = proofHtml(sec.proof);
@@ -1889,20 +1923,23 @@ async function askCopilot(question) {
   };
   const finish = (data) => {
     applyMeta(data);
-    paint({ say: data.grounded || 'No answer.', proof: data.proof || '', ask: data.ask || '', read: data.opinion || '' }, false);
+    paint({ say: data.grounded || 'No answer.', proof: data.proof || '', ask: data.ask || '', read: data.opinion || '', mode: data.mode }, false);
     sayBody.classList.remove('cp-cursor');
     const conf = data.confidence || 'medium';
     confEl.textContent = conf + ' confidence'; confEl.className = 'cp-conf ' + conf; oBox.style.display = '';
     if (!data.opinion) oBody.innerHTML = '';
     const srcs = data.sources || '';
     srcEl.textContent = (srcs ? 'Sources: ' + srcs : '') + (data.ms ? (srcs ? '  ·  ' : '') + (data.ms / 1000).toFixed(1) + 's' : '');
+    if (data.dataAsOf) dataAsOf = data.dataAsOf;
+    if (Array.isArray(data.queries)) { queryLines.length = 0; queryLines.push(...data.queries); }
+    showStatus(true);
     const sayBtn = $('.cp-copy-say'); sayBtn.style.display = ''; sayBtn.onclick = () => cpCopy(sayBtn, plainText(data.grounded));
     const askBtn = $('.cp-copy-ask'); askBtn.onclick = () => cpCopy(askBtn, plainText(data.ask));
     actions.style.display = '';
     const full = (data.grounded || '') + (data.proof ? '\n\n[PROOF] ' + data.proof : '') + (data.ask ? '\n\n[ASK] ' + data.ask : '') + (data.opinion ? '\n\n[READ] ' + data.opinion : '');
     buildThumbs(actions, q, full, srcs, { type: data.type, industry: data.industry, confidence: conf });
     cpHistory.push({ role: 'user', content: q });
-    cpHistory.push({ role: 'assistant', content: data.grounded || '' });
+    cpHistory.push({ role: 'assistant', content: (data.grounded || '').slice(0, 2000) });
     if (cpHistory.length > 16) cpHistory = cpHistory.slice(-16);
     loadRecent();
   };
@@ -1929,6 +1966,8 @@ async function askCopilot(question) {
             let d; try { d = JSON.parse(dl); } catch { continue; }
             if (ev === 'meta') applyMeta(d);
             else if (ev === 'delta') { raw += d.text; paint(cpSplit(raw), true); cpScroll(); }
+            else if (ev === 'tool') { raw = ''; queryLines.push(d.summary + (d.ok ? (d.matched != null ? ' → ' + d.matched + ' rows' : '') : ' (error)')); showStatus(false); sayBody.innerHTML = '<span class="cp-thinking">Running ' + queryLines.length + ' quer' + (queryLines.length > 1 ? 'ies' : 'y') + '…</span>'; cpScroll(); }
+            else if (ev === 'reset') { raw = ''; if (!d.keepQueries) queryLines.length = 0; showStatus(false); sayBody.innerHTML = '<span class="cp-thinking">Writing the answer…</span>'; }
             else if (ev === 'done') data = d;
             else if (ev === 'error') throw Object.assign(new Error(d.error || 'Copilot failed'), { fatal: true });
           }
@@ -1985,6 +2024,7 @@ document.getElementById('cp-refresh').addEventListener('click', () => {
       <div class="cp-empty-icon">◇</div>
       <p>Ask a question. Type a client name, even half of it, and the Copilot will find it.</p>
       <div class="cp-examples">
+        <button class="cp-chip">How many joinees this month, by client?</button>
         <button class="cp-chip">What have we done for EY GDS?</button>
         <button class="cp-chip">Java hires in BFSI, and what experience range?</button>
         <button class="cp-chip">Client says they have a strong internal team. What do I say?</button>

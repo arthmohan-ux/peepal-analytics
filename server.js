@@ -57,9 +57,9 @@ app.post('/api/auth', (req, res) => {
 });
 
 // ── POST /api/ask (BD Copilot) ──
-// Send { stream: true } to get Server-Sent Events: a "meta" event with the fact cards the
-// moment retrieval finishes, "delta" events while the model writes, then "done" with the
-// parsed answer. Without it the endpoint returns one JSON object, as before.
+// Send { stream: true } to get Server-Sent Events: "meta" (how fresh the data is), one
+// "tool" event per query the model runs, "delta" events while it writes, then "done" with
+// the parsed answer. Without it the endpoint returns one JSON object, as before.
 app.post('/api/ask', async (req, res) => {
   if (!validateBasicAuth(req)) return res.status(401).json({ error: 'Unauthorized' });
   const b = req.body || {};
@@ -290,6 +290,12 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  // Build the Copilot's data pack now so the first question is not the slow one.
-  if (process.env.SHEET_ID) require('./netlify/lib/kb').getPack().then(() => console.log('Copilot pack ready')).catch((e) => console.error('Copilot pack warm-up failed:', e.message));
+  // Load the tracker now so the first question is not the slow one, then keep it fresh
+  // in the background (every TRACKER_REFRESH_MS, default 5 minutes).
+  if (process.env.SHEET_ID || process.env.TRACKER_JSON) {
+    const data = require('./netlify/lib/data');
+    data.getData().then((d) => console.log(`Copilot data ready: ${d.coverage.joinees} joinees, latest ${d.coverage.latestJoinee}`))
+      .catch((e) => console.error('Copilot data warm-up failed:', e.message));
+    data.startAutoRefresh();
+  }
 });
